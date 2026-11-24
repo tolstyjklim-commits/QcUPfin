@@ -22,6 +22,22 @@ const conf = env => ({
   rate: num(env.COINS_PER_STAR, 1), ttlMs: num(env.TTL_MIN, 60) * 60_000,
 })
 
+// ---------- таблицы базы: Worker создаёт их сам при первом запросе (CREATE ... IF NOT EXISTS), поэтому ключу Cloudflare не нужны права на запись в D1 ----------
+const SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS deposits (
+    memo TEXT PRIMARY KEY, tg_id TEXT NOT NULL, asset TEXT NOT NULL DEFAULT 'STARS', stars INTEGER NOT NULL, rate REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending', paid INTEGER, coins INTEGER, tx TEXT UNIQUE,
+    created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, credited_at INTEGER, claimed_at INTEGER)`,
+  'CREATE INDEX IF NOT EXISTS deposits_user ON deposits (tg_id, status, claimed_at)',
+  'CREATE TABLE IF NOT EXISTS pay_log (id INTEGER PRIMARY KEY AUTOINCREMENT, t INTEGER NOT NULL, event TEXT NOT NULL, memo TEXT, data TEXT)',
+  'CREATE INDEX IF NOT EXISTS pay_log_memo ON pay_log (memo)',
+]
+let schemaReady = null
+function ensureSchema(env) {
+  if (!schemaReady) schemaReady = env.DB.batch(SCHEMA.map(q => env.DB.prepare(q))).catch(e => { schemaReady = null; throw e })
+  return schemaReady
+}
+
 // ---------- ответы и CORS ----------
 function cors(env, req) {
   const origin = req.headers.get('origin') || ''
@@ -183,6 +199,7 @@ export default {
     const url = new URL(req.url), path = url.pathname
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(env, req) })
     try {
+      await ensureSchema(env)
       if (path === '/api/deposit/config' && req.method === 'GET') {
         const c = conf(env)
         return json(env, req, { enabled: true, address: '', coinsPerTon: 0, minTon: 0, maxTon: 0, ttlMin: c.ttlMs / 60_000, usdt: { min: 1, max: 1, coinsPerUsdt: 0 }, stars: { enabled: !!env.BOT_TOKEN, min: c.min, max: c.max, coinsPerStar: c.rate } })
