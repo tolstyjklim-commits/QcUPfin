@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+model User {
+  id             String   @id @default(cuid())
+  telegramId     String   @unique
+  username       String?
+  firstName      String?
+  photoUrl       String?
+  createdAt      DateTime @default(now())
+  wallet         Wallet?
+  transactions   Transaction[]
+  deposits       Deposit[]
+}
+model Wallet {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  // Integer minor units; do not use floating-point money values.
+  balance   BigInt   @default(0)
+  currency  String   @default("QCP")
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id])
+}
+model Transaction {
+  id          String   @id @default(cuid())
+  userId      String
+  amount      BigInt
+  type        String
+  status      String   @default("pending")
+  description String?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id])
+  @@index([userId, createdAt])
+}
+model Game {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  enabled     Boolean  @default(false)
+  config      Json?
+  createdAt   DateTime @default(now())
+}
+model Deposit {
+  id          String   @id @default(cuid())
+  userId      String
+  asset       String   @default("TON")    // TON | USDT
+  memo        String   @unique          // комментарий к платежу, по нему находим пользователя
+  amountNano  BigInt?                   // ожидаемая сумма в минимальных единицах (TON: 1e-9, USDT: 1e-6)
+  paidNano    BigInt?                   // фактически получено в тех же единицах
+  rate        Float?                    // монет за 1 TON/USDT, зафиксировано при создании платежа
+  coins       BigInt?                   // сколько монет начислено
+  txHash      String?  @unique          // защита от двойного зачисления
+  status      String   @default("pending") // pending | credited | expired
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  creditedAt  DateTime?
+  claimedAt   DateTime?                // когда монеты добавлены в баланс игр
+  user        User     @relation(fields: [userId], references: [id])
+  @@index([userId, createdAt])
+  @@index([status, expiresAt])
+}

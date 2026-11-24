@@ -1,0 +1,4 @@
+# HTTPS-сертификат Caddy получает сам для домена из API_DOMAIN
+{$API_DOMAIN} {
+	reverse_proxy api:4000
+}

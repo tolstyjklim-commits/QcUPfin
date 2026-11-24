@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: qcup
+      POSTGRES_PASSWORD: qcup_local_password
+      POSTGRES_DB: qcup
+    ports:
+      - "5432:5432"
+    volumes:
+      - qcup_pgdata:/var/lib/postgresql/data
+volumes:
+  qcup_pgdata:

@@ -1,0 +1,19 @@
+name = "qcup-pay"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "qcup"
+database_id = "ВСТАВЬТЕ_СЮДА_ID_ИЗ_КОМАНДЫ_d1_create"
+
+[vars]
+# Адрес вашего сайта на GitHub Pages БЕЗ слэша в конце, например https://myname.github.io  (пусто = разрешить всем)
+ALLOWED_ORIGIN = ""
+# Полный адрес игры (https, со слэшем на конце), например https://ваш-логин.github.io/qcup/ : его открывает кнопка «Играть» в боте
+WEBAPP_URL = ""
+# Необязательно: BOT_BUTTON_TEXT, BOT_WELCOME_TEXT (HTML), BOT_WELCOME_IMAGE (https-ссылка на картинку)
+MIN_STARS = "10"
+MAX_STARS = "100000"
+COINS_PER_STAR = "1"
+TTL_MIN = "60"

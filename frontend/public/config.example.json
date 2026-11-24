@@ -1,0 +1,11 @@
+{
+  "tonAddress": "",
+  "trc20Address": "",
+  "methods": { "TON": true, "USDT_TON": true, "USDT_TRC20": true, "STARS": true },
+  "min": { "ton": 0.1, "usdt": 1, "stars": 10 },
+  "max": { "ton": 1000, "usdt": 5000, "stars": 100000 },
+  "ttlMin": 60,
+  "toncenterKey": "",
+  "tronKey": "",
+  "starUsd": 0.015
+}

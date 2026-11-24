@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>QcUp: админ-панель пополнений</title>
+<style>
+:root{--bg:#f4f6fa;--card:#fff;--ink:#141a26;--muted:#667085;--line:#e3e8f0;--brand:#2563eb;--ok:#0f9d58;--bad:#d92d20;--warn:#b54708;--code:#0f172a}
+@media(prefers-color-scheme:dark){:root{--bg:#0d1117;--card:#161b24;--ink:#e8ecf3;--muted:#98a2b3;--line:#262d3a;--brand:#4f8bff;--ok:#34c47c;--bad:#ff6b5e;--warn:#f2a64b;--code:#0a0e14}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:880px;margin:0 auto;padding:24px 16px 80px}
+h1{font-size:24px;margin:8px 0 4px}h2{font-size:17px;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:640px){.grid{grid-template-columns:1fr}}
+label{display:block;font-weight:600;font-size:13px;margin:12px 0 4px}
+.hint{color:var(--muted);font-size:12.5px;margin:4px 0 0}
+input[type=text],input[type=number],input[type=password]{width:100%;height:42px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);padding:0 12px;font:inherit}
+input.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+input:focus{outline:2px solid var(--brand);outline-offset:0}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+button{height:40px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:0 14px;font:inherit;font-weight:600;cursor:pointer}
+button.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+button:hover{filter:brightness(.97)}
+.badge{display:inline-block;font-size:12px;font-weight:700;border-radius:999px;padding:2px 10px;margin-left:6px}
+.ok{background:#0f9d5822;color:var(--ok)}.bad{background:#d92d2022;color:var(--bad)}.idle{background:var(--line);color:var(--muted)}
+.toggle{display:flex;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.toggle:first-of-type{border-top:0}
+.toggle b{display:block}.toggle small{color:var(--muted)}
+pre{background:var(--code);color:#d6e2ff;border-radius:12px;padding:14px;overflow:auto;font-size:12.5px;margin:10px 0 0}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top;word-break:break-all}
+th{color:var(--muted);font-weight:600}
+.notice{border-radius:12px;padding:12px 14px;font-size:13.5px;margin-bottom:16px;border:1px solid}
+.notice.warn{background:rgba(247,144,9,.1);border-color:rgba(247,144,9,.35);color:var(--warn)}
+.steps{margin:6px 0 0;padding-left:20px}.steps li{margin:4px 0}
+.msg{font-size:13px;margin-top:8px;min-height:18px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p style="font-size:13px;margin:0"><a href="./index.html" style="color:var(--brand)">← Игра</a> &nbsp; <a href="./demo.html" style="color:var(--brand)">Демо-баланс для тестов →</a></p>
+  <h1>Админ-панель пополнений</h1>
+  <p class="sub">Здесь вы задаёте кошельки для приёма платежей, проверяете их и получаете файл <b>config.json</b>, который кладётся рядом с сайтом.</p>
+
+  <div class="notice warn"><b>Важно.</b> Эта страница открыта для всех и ничего не меняет на сайте сама: она только готовит файл. Настройки вступают в силу, когда вы загрузите <b>config.json</b> в репозиторий (папка <code>frontend/public</code>). Не вводите сюда приватные ключи и сид-фразы. Нужны только публичные адреса кошельков.</div>
+
+  <div class="card">
+    <h2>1. Кошельки для приёма <span id="b-ton" class="badge idle">не проверен</span></h2>
+    <p class="hint">Платежи в TON и в USDT (сеть TON) поступают на один и тот же адрес.</p>
+    <label for="tonAddress">Адрес TON-кошелька</label>
+    <input id="tonAddress" class="mono" type="text" placeholder="UQ… или EQ…" autocomplete="off" spellcheck="false">
+    <div class="row" style="margin-top:8px"><button id="chk-ton">Проверить адрес и сеть</button><button id="tx-ton">Последние входящие</button></div>
+    <div id="msg-ton" class="msg"></div>
+    <div id="list-ton"></div>
+
+    <hr style="border:0;border-top:1px solid var(--line);margin:18px 0">
+
+    <h2>USDT в сети TRON (TRC20) <span id="b-trx" class="badge idle">не проверен</span></h2>
+    <label for="trc20Address">Адрес TRON-кошелька</label>
+    <input id="trc20Address" class="mono" type="text" placeholder="T…" autocomplete="off" spellcheck="false">
+    <div class="row" style="margin-top:8px"><button id="chk-trx">Проверить адрес и сеть</button><button id="tx-trx">Последние входящие</button></div>
+    <div id="msg-trx" class="msg"></div>
+    <div id="list-trx"></div>
+  </div>
+
+  <div class="card">
+    <h2>2. Какие способы показывать игрокам</h2>
+    <div class="toggle"><input type="checkbox" id="m-TON" checked><div><b>TON</b><small>Опознаётся по уникальному комментарию в переводе</small></div></div>
+    <div class="toggle"><input type="checkbox" id="m-USDT_TON" checked><div><b>USDT (сеть TON)</b><small>По адресу отправителя, точной уникальной сумме и времени перевода</small></div></div>
+    <div class="toggle"><input type="checkbox" id="m-USDT_TRC20" checked><div><b>USDT (сеть TRON, TRC20)</b><small>По адресу отправителя, точной уникальной сумме и времени перевода</small></div></div>
+    <div class="toggle"><input type="checkbox" id="m-STARS" checked><div><b>Telegram Stars ⭐</b><small>Оплата прямо в Telegram, 1 Star = 1 ⭐. Работает только с сервером (VPS): без него способ скрыт у игроков</small></div></div>
+  </div>
+
+  <div class="card">
+    <h2>3. Лимиты и время</h2>
+    <div class="grid">
+      <div><label>Минимум, TON</label><input id="minTon" type="number" step="any" value="0.1"></div>
+      <div><label>Максимум, TON</label><input id="maxTon" type="number" step="any" value="1000"></div>
+      <div><label>Минимум, USDT</label><input id="minUsdt" type="number" step="any" value="1"></div>
+      <div><label>Максимум, USDT</label><input id="maxUsdt" type="number" step="any" value="5000"></div>
+      <div><label>Минимум, Stars</label><input id="minStars" type="number" step="1" value="10"></div>
+      <div><label>Максимум, Stars</label><input id="maxStars" type="number" step="1" value="100000"></div>
+      <div><label>Окно оплаты, минут</label><input id="ttlMin" type="number" step="1" value="60"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3.5. Сервер платежей (Cloudflare Worker)</h2>
+    <p class="hint">Адрес вашего Worker, например <code>https://qcup-pay.ваш-аккаунт.workers.dev</code>. Когда он указан, пополнение Stars идёт по-настоящему через бота, а проверка платежей переходит на сервер. Пустое поле: платежи проверяет браузер, Stars работают только в тестовом режиме.</p>
+    <label for="apiUrl">Адрес сервера платежей</label>
+    <input id="apiUrl" class="mono" type="text" placeholder="https://…workers.dev" autocomplete="off" spellcheck="false">
+  </div>
+
+  <div class="card">
+    <h2>4. Ключи и запасной курс (необязательно)</h2>
+    <p class="hint">Ключи попадут в публичный config.json и будут видны всем. Заводите отдельные ключи только для этого сайта.</p>
+    <div class="grid">
+      <div><label>Ключ toncenter</label><input id="toncenterKey" class="mono" type="text" autocomplete="off"></div>
+      <div><label>Ключ TronGrid</label><input id="tronKey" class="mono" type="text" autocomplete="off"></div>
+      <div><label>Запасная цена 1 Star, USD</label><input id="starUsd" type="number" step="any" value="0.015"></div>
+      <div><label>Запасная цена 1 TON, USD</label><input id="tonUsd" type="number" step="any" placeholder="например 3.2"></div>
+    </div>
+    <p class="hint">Запасной курс используется, только если не удалось получить рыночный.</p>
+  </div>
+
+  <div class="card">
+    <h2>5. Готовый config.json</h2>
+    <pre id="out">{}</pre>
+    <div class="row" style="margin-top:12px">
+      <button class="primary" id="dl">Скачать config.json</button>
+      <button id="cp">Копировать</button>
+      <button id="test">Применить на этом устройстве (тест)</button>
+      <button id="untest">Сбросить тест</button>
+    </div>
+    <div id="msg-out" class="msg"></div>
+    <ol class="steps">
+      <li>Скачайте <b>config.json</b> и положите в папку <code>frontend/public</code> проекта (рядом с <code>admin.html</code>).</li>
+      <li>Загрузите изменения в репозиторий (push). GitHub Pages пересоберёт сайт за пару минут.</li>
+      <li>Откройте сайт, нажмите «Пополнить» и проверьте, что видны нужные способы.</li>
+    </ol>
+    <p class="hint">«Применить на этом устройстве» сохраняет настройки только в этом браузере, чтобы проверить окно пополнения до загрузки файла. Другим игрокам они не видны.</p>
+  </div>
+
+  <div class="card">
+    <h2>6. Доступ к демо-балансу <span id="b-demo" class="badge idle">выключен</span></h2>
+    <p class="hint">Страница <code>demo.html</code> всегда открывается на вашем компьютере при локальном запуске. На опубликованном сайте она работает только по паролю. Игроки пароля не знают, поэтому демо для них недоступно.</p>
+    <label for="demoPw">Пароль для демо (не короче 8 символов)</label>
+    <input id="demoPw" type="password" autocomplete="new-password">
+    <div class="row" style="margin-top:8px"><button id="demoOff">Выключить демо на сайте</button></div>
+    <p class="hint">В config.json попадает только необратимый хэш пароля. Придумайте длинный пароль: слабые пароли по хэшу можно подобрать. Если демо вам не нужно, лучше вообще удалить demo.html.</p>
+  </div>
+
+  <div class="card">
+    <h2>7. Журнал платежей (этого браузера)</h2>
+    <p class="hint">Показывает события пополнения, которые обработал этот браузер: создание заявки, зачисление, отклонённые платежи, ошибки опроса. Журнал открывается там же, где открыта игра (тот же адрес сайта). Серверный журнал лежит в файле <code>logs/payments.jsonl</code> на VPS.</p>
+    <div class="row"><button id="log-refresh">Обновить</button><button id="log-dl">Скачать</button><button id="log-clear">Очистить</button></div>
+    <pre id="log-out" class="mono" style="max-height:260px;overflow:auto;white-space:pre-wrap">Нажмите «Обновить».</pre>
+  </div>
+
+  <div class="card">
+    <h2>Как платёж привязывается к игроку</h2>
+    <ul class="steps">
+      <li><b>TON.</b> В заявке игрока есть случайный комментарий (memo). Платёж с таким комментарием зачисляется именно этой заявке.</li>
+      <li><b>USDT (TON и TRON).</b> К переводам USDT нельзя надёжно прикрепить комментарий, поэтому игрок указывает адрес своего кошелька, к сумме добавляется уникальная «копейка» (до 0,01 USDT), и засчитывается только перевод с этого адреса, на точную сумму и после создания заявки.</li>
+      <li><b>Telegram Stars.</b> Игрок платит счётом внутри Telegram, бот сервера подтверждает оплату и зачисляет ⭐ один раз (по номеру платежа Telegram). Нужен сервер и токен бота в его .env; лимиты на сервере задаются MIN_DEPOSIT_STARS и MAX_DEPOSIT_STARS.</li>
+      <li><b>Честное ограничение.</b> Платёж принимается, только если он сделан внутри окна заявки (не раньше создания и не позже истечения), и один платёж зачисляется один раз. Пока сайт работает без своего сервера, баланс хранится в браузере игрока, а проверка платежа делается на его стороне. Для вывода денег и защиты от подделки нужен серверный режим (см. DEPLOY.md).</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id)
+const METHODS = ['TON','USDT_TON','USDT_TRC20','STARS']
+
+// ---------- проверка формата адресов ----------
+function crc16(bytes){let c=0;for(const b of bytes){c^=b<<8;for(let i=0;i<8;i++)c=(c&0x8000)?((c<<1)^0x1021)&0xffff:(c<<1)&0xffff}return c}
+function tonOk(a){
+  a=a.trim()
+  if(/^-?\d+:[0-9a-fA-F]{64}$/.test(a))return{ok:true,kind:'raw'}
+  if(!/^[A-Za-z0-9_\-+\/]{48}$/.test(a))return{ok:false}
+  try{
+    const b=Uint8Array.from(atob(a.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0))
+    if(b.length!==36)return{ok:false}
+    if(crc16(b.slice(0,34))!==((b[34]<<8)|b[35]))return{ok:false,why:'не сходится контрольная сумма: проверьте, нет ли опечатки'}
+    return{ok:true,kind:(b[0]&0x80)?'testnet':'mainnet'}
+  }catch{return{ok:false}}
+}
+const B58='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+async function tronOk(a){
+  a=a.trim()
+  if(!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(a))return{ok:false}
+  let n=0n;for(const ch of a)n=n*58n+BigInt(B58.indexOf(ch))
+  const bytes=[];for(let i=0;i<25;i++){bytes.unshift(Number(n&0xffn));n>>=8n}
+  const body=new Uint8Array(bytes.slice(0,21))
+  const h1=new Uint8Array(await crypto.subtle.digest('SHA-256',body))
+  const h2=new Uint8Array(await crypto.subtle.digest('SHA-256',h1))
+  const okSum=bytes.slice(21).every((v,i)=>v===h2[i])
+  return okSum&&bytes[0]===0x41?{ok:true}:{ok:false,why:'не сходится контрольная сумма: проверьте, нет ли опечатки'}
+}
+function setBadge(id,cls,text){const b=$(id);b.className='badge '+cls;b.textContent=text}
+function msg(id,text,cls){const m=$(id);m.textContent=text;m.style.color=cls==='bad'?'var(--bad)':cls==='ok'?'var(--ok)':'var(--muted)'}
+const fmtDate=ts=>new Date(ts).toLocaleString('ru-RU')
+function table(rows,head){
+  if(!rows.length)return'<p class="hint">Входящих платежей пока нет.</p>'
+  return'<table><thead><tr>'+head.map(h=>`<th>${h}</th>`).join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(c=>`<td>${String(c).replace(/[<>&]/g,'')}</td>`).join('')+'</tr>').join('')+'</tbody></table>'
+}
+
+// ---------- проверки в сети ----------
+$('chk-ton').onclick=async()=>{
+  const a=$('tonAddress').value.trim(),v=tonOk(a)
+  if(!a){setBadge('b-ton','idle','не указан');return msg('msg-ton','Введите адрес.')}
+  if(!v.ok){setBadge('b-ton','bad','ошибка');return msg('msg-ton','Адрес неверный'+(v.why?': '+v.why:'. Ожидается адрес TON вида UQ… или EQ… (48 символов).'),'bad')}
+  if(v.kind==='testnet'){setBadge('b-ton','bad','testnet');return msg('msg-ton','Это адрес тестовой сети. Нужен адрес основной сети.','bad')}
+  msg('msg-ton','Проверяю…')
+  try{
+    const key=$('toncenterKey').value.trim()
+    const r=await fetch('https://toncenter.com/api/v2/getAddressInformation?address='+encodeURIComponent(a),{headers:key?{'X-API-Key':key}:{}})
+    const j=await r.json()
+    if(!j.ok)throw new Error(j.error||'ошибка toncenter')
+    const bal=(Number(j.result.balance)/1e9).toFixed(4)
+    setBadge('b-ton','ok','адрес верный')
+    msg('msg-ton',`Сеть отвечает. Состояние: ${j.result.state}, баланс: ${bal} TON.`+(j.result.state==='uninit'?' Кошелёк ещё не активирован: сделайте с него любую исходящую транзакцию, прежде чем принимать платежи.':''),'ok')
+  }catch(e){setBadge('b-ton','idle','формат верный');msg('msg-ton','Формат верный, но проверить в сети не удалось: '+e.message+' (возможно, лимит запросов без ключа).')}
+  update()
+}
+$('tx-ton').onclick=async()=>{
+  const a=$('tonAddress').value.trim();if(!tonOk(a).ok)return msg('msg-ton','Сначала введите верный адрес.','bad')
+  msg('msg-ton','Загружаю…')
+  try{
+    const key=$('toncenterKey').value.trim()
+    const r=await fetch('https://toncenter.com/api/v2/getTransactions?limit=15&archival=true&address='+encodeURIComponent(a),{headers:key?{'X-API-Key':key}:{}})
+    const j=await r.json();if(!j.ok)throw new Error(j.error||'ошибка')
+    const rows=j.result.filter(t=>t.in_msg&&t.in_msg.source).slice(0,8).map(t=>[fmtDate(t.utime*1000),(Number(t.in_msg.value)/1e9).toFixed(4)+' TON',t.in_msg.message||'—',(t.in_msg.source||'').slice(0,12)+'…'])
+    $('list-ton').innerHTML=table(rows,['Время','Сумма','Комментарий','От']);msg('msg-ton','Показаны последние входящие переводы TON.','ok')
+  }catch(e){msg('msg-ton','Не удалось загрузить: '+e.message,'bad')}
+}
+$('chk-trx').onclick=async()=>{
+  const a=$('trc20Address').value.trim()
+  if(!a){setBadge('b-trx','idle','не указан');return msg('msg-trx','Введите адрес или оставьте пустым, чтобы отключить TRC20.')}
+  const v=await tronOk(a)
+  if(!v.ok){setBadge('b-trx','bad','ошибка');return msg('msg-trx','Адрес неверный'+(v.why?': '+v.why:'. Ожидается адрес TRON вида T… (34 символа).'),'bad')}
+  msg('msg-trx','Проверяю…')
+  try{
+    const key=$('tronKey').value.trim()
+    const r=await fetch('https://api.trongrid.io/v1/accounts/'+a,{headers:key?{'TRON-PRO-API-KEY':key}:{}})
+    const j=await r.json()
+    if(j.data&&j.data.length){setBadge('b-trx','ok','адрес верный');msg('msg-trx','Сеть отвечает, аккаунт найден в TRON.','ok')}
+    else{setBadge('b-trx','ok','формат верный');msg('msg-trx','Формат верный, но аккаунт ещё не активирован в сети (не было ни одного перевода). Это нормально для нового адреса: после первого получения он активируется.','ok')}
+  }catch(e){setBadge('b-trx','idle','формат верный');msg('msg-trx','Формат верный, но проверить в сети не удалось: '+e.message)}
+  update()
+}
+$('tx-trx').onclick=async()=>{
+  const a=$('trc20Address').value.trim();if(!(await tronOk(a)).ok)return msg('msg-trx','Сначала введите верный адрес.','bad')
+  msg('msg-trx','Загружаю…')
+  try{
+    const key=$('tronKey').value.trim()
+    const r=await fetch(`https://api.trongrid.io/v1/accounts/${a}/transactions/trc20?only_confirmed=true&only_to=true&limit=8&contract_address=TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t`,{headers:key?{'TRON-PRO-API-KEY':key}:{}})
+    const j=await r.json()
+    const rows=(j.data||[]).map(t=>[fmtDate(t.block_timestamp),(Number(t.value)/1e6).toFixed(6)+' USDT',t.from])
+    $('list-trx').innerHTML=table(rows,['Время','Сумма','От']);msg('msg-trx','Показаны последние входящие переводы USDT (TRC20).','ok')
+  }catch(e){msg('msg-trx','Не удалось загрузить: '+e.message,'bad')}
+}
+
+// ---------- config.json ----------
+let demoHash=''
+// PBKDF2 вместо голого SHA-256: хеш лежит в публичном config.json, его не должно быть легко перебрать. Тот же код в deposit.tsx (pwHash)
+async function pwHash(pw){
+  const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveBits'])
+  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:new TextEncoder().encode('qcup-demo-v2'),iterations:150000},key,256)
+  return'v2:'+[...new Uint8Array(bits)].map(x=>x.toString(16).padStart(2,'0')).join('')
+}
+function demoBadge(){const b=$('b-demo');b.className='badge '+(demoHash?'ok':'idle');b.textContent=demoHash?'пароль задан':'выключен'}
+let pwSeq=0
+$('demoPw').addEventListener('input',async()=>{const v=$('demoPw').value,n=++pwSeq;const h=v.length>=8?await pwHash(v):'';if(n!==pwSeq)return;demoHash=h;demoBadge();update()})
+$('demoOff').onclick=()=>{demoHash='';$('demoPw').value='';demoBadge();update()}
+function build(){
+  const num=(id,d)=>{const v=parseFloat($(id).value);return v>0?v:d}
+  const c={
+    tonAddress:$('tonAddress').value.trim(),
+    trc20Address:$('trc20Address').value.trim(),
+    methods:Object.fromEntries(METHODS.map(m=>[m,$('m-'+m).checked])),
+    min:{ton:num('minTon',0.1),usdt:num('minUsdt',1),stars:Math.round(num('minStars',10))},
+    max:{ton:num('maxTon',1000),usdt:num('maxUsdt',5000),stars:Math.round(num('maxStars',100000))},
+    ttlMin:Math.round(num('ttlMin',60)),
+    toncenterKey:$('toncenterKey').value.trim(),
+    tronKey:$('tronKey').value.trim(),
+    starUsd:num('starUsd',0.015)
+  }
+  if($('apiUrl').value.trim())c.apiUrl=$('apiUrl').value.trim().replace(/\/$/,'')
+  if(demoHash)c.demoHash=demoHash
+  if(num('tonUsd',0)>0)c.tonUsd=num('tonUsd',0)
+  return c
+}
+async function problems(c){
+  const p=[]
+  if(c.tonAddress&&!tonOk(c.tonAddress).ok)p.push('Адрес TON неверный.')
+  if(c.trc20Address&&!(await tronOk(c.trc20Address)).ok)p.push('Адрес TRON неверный.')
+  if((c.methods.TON||c.methods.USDT_TON)&&!c.tonAddress)p.push('Включены способы в сети TON, но адрес TON не задан.')
+  if(c.methods.USDT_TRC20&&!c.trc20Address)p.push('Включён TRC20, но адрес TRON не задан.')
+  if(c.apiUrl&&!/^https:\/\/[^\s/]+$/.test(c.apiUrl))p.push('Адрес сервера платежей должен начинаться с https:// и не содержать путь.')
+  if($('demoPw').value&&$('demoPw').value.length<8)p.push('Пароль для демо короче 8 символов.')
+  if(c.min.ton>c.max.ton||c.min.usdt>c.max.usdt||c.min.stars>c.max.stars)p.push('Минимум больше максимума.')
+  return p
+}
+async function update(){
+  const c=build();$('out').textContent=JSON.stringify(c,null,2)
+  const p=await problems(c);msg('msg-out',p.join(' '),p.length?'bad':'')
+  return p
+}
+document.querySelectorAll('input').forEach(i=>i.addEventListener('input',update))
+$('dl').onclick=async()=>{
+  const p=await update();if(p.length)return
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(build(),null,2)+'\n'],{type:'application/json'}));a.download='config.json';a.click()
+  msg('msg-out','Файл скачан. Положите его в frontend/public и загрузите в репозиторий.','ok')
+}
+$('cp').onclick=async()=>{const p=await update();if(p.length)return;await navigator.clipboard.writeText(JSON.stringify(build(),null,2));msg('msg-out','Скопировано.','ok')}
+$('test').onclick=async()=>{const p=await update();if(p.length)return;localStorage.setItem('qcup-config-override',JSON.stringify(build()));msg('msg-out','Тестовые настройки применены только в этом браузере. Откройте сайт и нажмите «Пополнить».','ok')}
+$('untest').onclick=()=>{localStorage.removeItem('qcup-config-override');msg('msg-out','Тестовые настройки сброшены.','ok')}
+
+// ---------- журнал платежей ----------
+const readLog=()=>{try{return JSON.parse(localStorage.getItem('qcup-pay-log')||'[]')}catch{return[]}}
+function showLog(){const l=readLog();$('log-out').textContent=l.length?l.slice().reverse().map(e=>JSON.stringify(e)).join('\n'):'Журнал пуст.'}
+$('log-refresh').onclick=showLog
+$('log-clear').onclick=()=>{localStorage.removeItem('qcup-pay-log');showLog()}
+$('log-dl').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([readLog().map(e=>JSON.stringify(e)).join('\n')+'\n'],{type:'text/plain'}));a.download='payments-browser.jsonl';a.click()}
+
+// подставить уже опубликованный config.json
+;(async()=>{
+  try{
+    const j=await (await fetch('./config.json?t='+Date.now(),{cache:'no-store'})).json()
+    for(const k of ['tonAddress','trc20Address','toncenterKey','tronKey'])if(j[k])$(k).value=j[k]
+    if(j.methods)for(const m of METHODS)if(typeof j.methods[m]==='boolean')$('m-'+m).checked=j.methods[m]
+    if(j.min){if(j.min.ton)$('minTon').value=j.min.ton;if(j.min.usdt)$('minUsdt').value=j.min.usdt;if(j.min.stars)$('minStars').value=j.min.stars}
+    if(j.max){if(j.max.ton)$('maxTon').value=j.max.ton;if(j.max.usdt)$('maxUsdt').value=j.max.usdt;if(j.max.stars)$('maxStars').value=j.max.stars}
+    if(j.ttlMin)$('ttlMin').value=j.ttlMin
+    if(j.starUsd)$('starUsd').value=j.starUsd
+    if(j.apiUrl)$('apiUrl').value=j.apiUrl
+    if(j.tonUsd)$('tonUsd').value=j.tonUsd
+    if(j.demoHash&&String(j.demoHash).startsWith('v2:')){demoHash=j.demoHash;demoBadge()}else if(j.demoHash){msg('msg-out','Старый пароль демо-режима больше не действует (формат хеша усилен). Задайте пароль заново в разделе 6.','bad')}
+  }catch{}
+  update()
+})()
+</script>
+<script>
+// Если страница открыта как файл, ссылки ведут на игру, запущенную через «Запуск QcUp.bat» (http://localhost:5173)
+if(location.protocol==='file:'){document.querySelectorAll('a[href^="./"]').forEach(a=>{a.href='http://localhost:5173/'+a.getAttribute('href').slice(2)})}
+</script>
+</body>
+</html>
