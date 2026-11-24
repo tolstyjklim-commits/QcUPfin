@@ -24,20 +24,33 @@ jobs:
           ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
         run: |
           set -euo pipefail
-          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
-            if [ -z "${!v}" ]; then echo "::error::Нет секрета $v (Settings, Secrets and variables, Actions)"; exit 1; fi
+          # пробелы и переводы строк, случайно попавшие в секреты при вставке, убираем
+          CF_TOKEN=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '[:space:]')
+          CF_ACCOUNT=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | tr -d '[:space:]')
+          for v in CF_TOKEN CF_ACCOUNT BOT_TOKEN ADMIN_KEY; do
+            if [ -z "${!v}" ]; then echo "::error::Пустой секрет: $v (Settings, Secrets and variables, Actions). CF_TOKEN это CLOUDFLARE_API_TOKEN, CF_ACCOUNT это CLOUDFLARE_ACCOUNT_ID"; exit 1; fi
           done
-          if [ -z "$BOT_TOKEN" ] || [ -z "$ADMIN_KEY" ]; then
-            echo "::error::Нет секрета BOT_TOKEN или ADMIN_KEY (Settings, Secrets and variables, Actions)"; exit 1
-          fi
-          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
-          H="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          echo "::add-mask::$CF_TOKEN"; echo "CF_TOKEN=$CF_TOKEN" >> "$GITHUB_ENV"; echo "CF_ACCOUNT=$CF_ACCOUNT" >> "$GITHUB_ENV"
+          API="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT"
+          # запрос к Cloudflare: при ошибке показывает код и ответ, а не просто «exit code 22»
+          cf() {
+            local out code body
+            out=$(curl -sS -w '\n%{http_code}' -H "Authorization: Bearer $CF_TOKEN" -H "content-type: application/json" -X "$1" "$API$2" ${3:+-d "$3"})
+            code="${out##*$'\n'}"; body="${out%$'\n'*}"
+            if [ "$code" -ge 400 ]; then
+              echo "::error::Cloudflare ответил $code на $1 $2. Ответ: $body" >&2
+              case "$code" in
+                401) echo "::error::401 = Cloudflare не принял ключ. Создайте ключ заново (My Profile, API Tokens, Create Custom Token), скопируйте целиком без пробелов и сохраните в секрете CLOUDFLARE_API_TOKEN." >&2 ;;
+                403) echo "::error::403 = у ключа не хватает прав или неверный Account ID. Нужны права Account: Workers Scripts Edit и D1 Edit, а CLOUDFLARE_ACCOUNT_ID должен быть номером именно этого аккаунта." >&2 ;;
+              esac
+              return 1
+            fi
+            printf '%s' "$body"
+          }
           # 1) база данных qcup: берём существующую или создаём
-          ID=$(curl -fsS -H "$H" "$API/d1/database?name=qcup" | jq -r '[.result[]? | select(.name=="qcup")][0].uuid // empty')
-          if [ -z "$ID" ]; then
-            ID=$(curl -fsS -H "$H" -H "content-type: application/json" -X POST "$API/d1/database" -d '{"name":"qcup"}' | jq -r '.result.uuid // empty')
-          fi
-          if [ -z "$ID" ]; then echo "::error::Не удалось получить базу D1. Проверьте права ключа Cloudflare: Workers Scripts Edit и D1 Edit"; exit 1; fi
+          ID=$(cf GET "/d1/database?name=qcup" | jq -r '[.result[]? | select(.name=="qcup")][0].uuid // empty')
+          if [ -z "$ID" ]; then ID=$(cf POST "/d1/database" '{"name":"qcup"}' | jq -r '.result.uuid // empty'); fi
+          if [ -z "$ID" ]; then echo "::error::Не удалось получить базу D1"; exit 1; fi
           # 2) адрес сайта: переменная WEBAPP_URL или стандартный адрес GitHub Pages этого репозитория
           OWNER=$(echo "$GITHUB_REPOSITORY_OWNER" | tr 'A-Z' 'a-z'); REPO="${GITHUB_REPOSITORY#*/}"
           if [ -n "$WEBAPP_URL_VAR" ]; then WEB="$WEBAPP_URL_VAR"
@@ -45,9 +58,9 @@ jobs:
           else WEB="https://$OWNER.github.io/$REPO/"; fi
           sed -i "s|^database_id = .*|database_id = \"$ID\"|; s|^WEBAPP_URL = .*|WEBAPP_URL = \"$WEB\"|" worker/wrangler.toml
           # 3) поддомен workers.dev (нужен новому аккаунту для первого выкладывания), необязательный шаг
-          SUB=$(curl -fsS -H "$H" "$API/workers/subdomain" | jq -r '.result.subdomain // empty' || true)
+          SUB=$(cf GET "/workers/subdomain" 2>/dev/null | jq -r '.result.subdomain // empty' || true)
           if [ -z "$SUB" ]; then
-            curl -fsS -H "$H" -H "content-type: application/json" -X PUT "$API/workers/subdomain" -d "{\"subdomain\":\"qcup-$(openssl rand -hex 4)\"}" >/dev/null || echo "Поддомен не создан автоматически: откройте раздел Workers & Pages в Cloudflare один раз"
+            cf PUT "/workers/subdomain" "{\"subdomain\":\"qcup-$(openssl rand -hex 4)\"}" >/dev/null 2>&1 || echo "Поддомен не создан автоматически: откройте раздел Workers & Pages в Cloudflare один раз"
           fi
           # 4) секрет вебхука: новый на каждый запуск, нигде не хранится
           W=$(openssl rand -hex 24); echo "::add-mask::$W"; echo "WEBHOOK_SECRET=$W" >> "$GITHUB_ENV"
@@ -57,8 +70,8 @@ jobs:
         id: deploy
         uses: cloudflare/wrangler-action@v3
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          apiToken: ${{ env.CF_TOKEN }}
+          accountId: ${{ env.CF_ACCOUNT }}
           workingDirectory: worker
           preCommands: npx wrangler d1 execute qcup --remote --file=schema.sql
           secrets: |
