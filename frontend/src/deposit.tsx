@@ -37,7 +37,7 @@ const defaults = (): SiteCfg => ({
   tonAddress: env.VITE_TON_ADDRESS || '', trc20Address: env.VITE_TRC20_ADDRESS || '',
   toncenterKey: env.VITE_TONCENTER_KEY || '', tronKey: env.VITE_TRONGRID_KEY || '',
   methods: { TON: true, USDT_TON: true, USDT_TRC20: true, STARS: true },
-  min: { ton: 0.1, usdt: 1, stars: 10 }, max: { ton: 1000, usdt: 5000, stars: 100000 }, ttlMin: 60,
+  min: { ton: 0.1, usdt: 1, stars: 10 }, max: { ton: 1_000_000, usdt: 10_000_000, stars: 10_000_000 }, ttlMin: 60,
   starUsd: Number(env.VITE_STAR_USD || 0.015), tonUsd: Number(env.VITE_TON_USD || 0), demoHash: '', apiUrl: '',
 })
 let cfgP: Promise<SiteCfg> | null = null
@@ -279,7 +279,7 @@ export function DepositModal({ onClose, onNotice }: { onClose: () => void; onNot
           if (first) { setMethod(first); setAmount(first === 'TON' ? '1' : first === 'STARS' ? '100' : '10') }
           setCfg({
             localCrypto: lc, tonAddress: lc ? c.tonAddress : j.address || '', trc20Address: lc ? c.trc20Address : '', methods, ttlMin: lc ? c.ttlMin : j.ttlMin,
-            min: { ton: lc ? c.min.ton : j.minTon, usdt: lc ? c.min.usdt : j.usdt?.min ?? 1, stars: st.min ?? 10 }, max: { ton: lc ? c.max.ton : j.maxTon, usdt: lc ? c.max.usdt : j.usdt?.max ?? 5000, stars: st.max ?? 100000 },
+            min: { ton: lc ? c.min.ton : j.minTon, usdt: lc ? c.min.usdt : j.usdt?.min ?? 1, stars: st.min ?? 10 }, max: { ton: lc ? c.max.ton : j.maxTon, usdt: lc ? c.max.usdt : j.usdt?.max ?? 10_000_000, stars: st.max ?? 10_000_000 },
             rate: { ton: lr ? lr.ton : j.coinsPerTon, usdt: lr ? lr.usdt : j.usdt?.coinsPerUsdt ?? 100, stars: st.coinsPerStar ?? 1 },
           })
         }).catch(() => setErr('Пополнение сейчас недоступно.'))

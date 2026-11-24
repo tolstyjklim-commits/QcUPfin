@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { RotateCcw } from 'lucide-react'
-import { GiftArt, preloadGift } from './art'
+import { Coin, GiftArt, TonIcon, UsdtIcon, preloadGift } from './art'
 import { Burst, CrashScene } from './fx'
 import { Bulbs, SlotDefs, SlotSym } from './slotart'
 import { play } from './sfx'
 import {
-  CASES, caseOddsOf, GIFTS, GIFT_ORDER, MINES_COUNT, MINES_TOTAL, PAYLINES, PLINKO_RISK, RACERS, SELL_RATE, type PlinkoRisk, SLOT3_PAY,
-  STORM_PAY, SYMBOLS, caseChance, crashPoint, minesMult, money, pickSymbol, raceOdds, raceSimulate, RACE_LAPS, RACE_LEN, RACE_PROBS, LAP_LEN, rint, rnd, upgradeChance, weighted,
-  type Gift, type GiftKind, type RaceEvent, type RaceSim, type Save,
-} from './lib'
+  CASES, caseOddsOf, pctText, GIFTS, GIFT_ORDER, MINES_COUNT, MINES_TOTAL, PAYLINES, PLINKO_RISK, RACERS, SELL_RATE, type PlinkoRisk, SLOT3_PAY,
+  STORM_PAY, SYMBOLS, caseChance, crashPoint, minesMult, money, pickSymbol, raceOdds, raceSimulate, RACE_LAPS, RACE_RTP, RACE_LEN, RACE_PROBS, LAP_LEN, rint, rnd, upgradeChance, weighted,
+  type Gift, type GiftKind, type RaceEvent, type RaceSim, type Save, cfmt, dispCur, dispNum, toDisp, fromDisp, DISP } from './lib'
 
 export type Ctx = {
   save: Save
@@ -23,26 +22,44 @@ export type Ctx = {
 }
 
 // ---------- общие элементы ----------
+export const MAX_BET = 10_000_000 // потолок ставки за раунд, как лимит стола в казино
+export function CurIcon({ size = 16 }: { size?: number }) {
+  const c = dispCur()
+  return c === 'TON' ? <TonIcon size={size} /> : c === 'USDT' ? <UsdtIcon size={size} /> : <Coin size={size} />
+}
 export function StakeInput({ value, onChange, balance, disabled, presets = [10, 50, 100, 500] }:
   { value: number; onChange: (n: number) => void; balance: number; disabled?: boolean; presets?: number[] }) {
-  const clamp = (n: number) => Math.max(1, Math.min(Math.floor(n) || 1, Math.max(1, balance)))
+  const cap = Math.max(1, Math.min(balance, MAX_BET))
+  const clamp = (n: number) => Math.max(1, Math.min(Math.floor(n) || 1, cap))
+  const cur = dispCur()
+  const [txt, setTxt] = useState<string | null>(null)
+  const unit = cur === 'STAR' ? 'звёзды' : cur
+  const shown = txt ?? (cur === 'STAR' ? String(value) : dispNum(value))
+  const typed = (raw: string) => {
+    if (cur === 'STAR') { onChange(clamp(Number(raw.replace(/\D/g, '')))); return }
+    const clean = raw.replace(',', '.').replace(/[^\d.]/g, '')
+    setTxt(clean.replace('.', ','))
+    const v = parseFloat(clean)
+    onChange(clamp(Number.isFinite(v) ? Math.round(fromDisp(v)) : 1))
+  }
   return (
     <div className="stake-box">
-      <label className="m small" htmlFor="stake">Ставка, ⭐</label>
+      <label className="m small stake-label" htmlFor="stake">Ставка <span className="stake-cur"><CurIcon size={16} />{unit}</span></label>
       <div className="stake-line">
-        <input id="stake" inputMode="numeric" value={value} disabled={disabled}
-          onChange={e => onChange(clamp(Number(e.target.value.replace(/\D/g, ''))))} />
-        <button disabled={disabled} onClick={() => onChange(clamp(value / 2))}>½</button>
-        <button disabled={disabled} onClick={() => onChange(clamp(value * 2))}>×2</button>
+        <input id="stake" inputMode={cur === 'STAR' ? 'numeric' : 'decimal'} value={shown} disabled={disabled}
+          onChange={e => typed(e.target.value)} onBlur={() => setTxt(null)} />
+        <button disabled={disabled} onClick={() => { setTxt(null); onChange(clamp(value / 2)) }}>½</button>
+        <button disabled={disabled} onClick={() => { setTxt(null); onChange(clamp(value * 2)) }}>×2</button>
       </div>
+      <p className="m small stake-eq">{cur !== 'STAR' ? `В игре это ${money(value)} ⭐ · ` : ''}лимит ставки {cfmt(MAX_BET)}</p>
       <div className="stake-presets">
-        {presets.map(p => <button key={p} disabled={disabled} className={p === value ? 'on' : ''} onClick={() => onChange(clamp(p))}>{p}</button>)}
-        <button disabled={disabled} onClick={() => onChange(clamp(balance))}>Все</button>
+        {presets.map(p => <button key={p} disabled={disabled} className={p === value ? 'on' : ''} onClick={() => { setTxt(null); onChange(clamp(p)) }}>{cur === 'STAR' ? p : dispNum(p)}</button>)}
+        <button disabled={disabled} onClick={() => { setTxt(null); onChange(clamp(cap)) }}>Макс</button>
       </div>
     </div>
   )
 }
-const Result = ({ children, good }: { children: React.ReactNode; good?: boolean }) =>
+export const Result = ({ children, good }: { children: React.ReactNode; good?: boolean }) =>
   <div className={`result ${good ? 'good' : ''}`}>{children}</div>
 
 function useCount(target: number, ms = 700) {
@@ -127,7 +144,7 @@ export function Crash({ ctx }: { ctx: Ctx }) {
         <CrashScene phase={phase} mult={mult} />
         <div className={`big-mult ${phase}`} key={phase === 'fly' ? Math.floor(mult) : 'x'}>{mult.toFixed(2)}×</div>
         {phase === 'crash' && <div className="boom">Улетела</div>}
-        {phase === 'cash' && <div className="boom ok">Забрано +{money(win)}</div>}
+        {phase === 'cash' && <div className="boom ok">Забрано +{cfmt(win)}</div>}
         {count > 0 && <div className="countdown" key={count}>{count}</div>}
         {phase === 'idle' && count === 0 && <div className="boom m">Сделай ставку: перед стартом будет отсчёт 3-2-1</div>}
       </div>
@@ -136,8 +153,8 @@ export function Crash({ ctx }: { ctx: Ctx }) {
         {[0, 1.5, 2, 5, 10].map(v => <button key={v} className={auto === v ? 'on' : ''} disabled={flying || count > 0} onClick={() => setAuto(v)}>{v ? `×${v}` : 'Выкл'}</button>)}
       </div>
       {flying
-        ? <button className="cta green pulse" onClick={cash}>Забрать {money(Math.floor(live.current.stake * mult))}</button>
-        : <button className="cta" disabled={count > 0} onClick={start}>{count > 0 ? `Старт через ${count}…` : `Сделать ставку · ${money(stake)}`}</button>}
+        ? <button className="cta green pulse" onClick={cash}>Забрать {cfmt(Math.floor(live.current.stake * mult))}</button>
+        : <button className="cta" disabled={count > 0} onClick={start}>{count > 0 ? `Старт через ${count}…` : `Сделать ставку · ${cfmt(stake)}`}</button>}
     </div>
   )
 }
@@ -213,7 +230,7 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
         setSel([g.uid]); setFx('win'); play.big()
       } else {
         ctx.notify(give.length > 1 ? 'Не повезло, подарки сгорели' : 'Не повезло, подарок сгорел')
-        setRes({ ok: false, text: give.length > 1 ? `${give.length} подарков сгорели (${money(curPrice)} ⭐)` : `${GIFTS[give[0].kind]?.name} #${give[0].num} сгорел` })
+        setRes({ ok: false, text: give.length > 1 ? `${give.length} подарков сгорели (${cfmt(curPrice)})` : `${GIFTS[give[0].kind]?.name} #${give[0].num} сгорел` })
         setSel([]); setFx('burn'); play.lose(); play.boom()
       }
       setSpinning(false)
@@ -240,7 +257,7 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
                 ? <GiftArt kind={first.kind} size={88} />
                 : <div className="upg-stack">{chosen.slice(0, 4).map((g, i) => <span key={g.uid} style={{ ['--i' as string]: i }}><GiftArt kind={g.kind} size={52} glow={false} /></span>)}{chosen.length > 4 && <em>+{chosen.length - 4}</em>}</div>}
               <b>{chosen.length === 1 ? `${GIFTS[first.kind]?.name} #${first.num}` : `${chosen.length} подарков`}</b>
-              <span className="gold">{money(curPrice)} ⭐</span>
+              <span className="gold">{cfmt(curPrice)}</span>
             </button>
             : <button className="slot-plus" disabled={spinning} onClick={() => { setPtab(gifts.length ? 'mine' : 'market'); setPicker(true) }} aria-label="Выбрать подарок"><span>+</span><b className="m small">{fx === 'burn' ? 'Сгорели. Выбери новые' : 'Выбрать подарки'}</b></button>}
           {fx === 'burn' && <Burst key="b" type="ember" n={60} />}
@@ -248,7 +265,7 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#a5bbb1" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 12h16M14 6l6 6-6 6" /></svg>
         <div className={`upg-slot ${fx === 'win' ? 'glow' : ''} ${spinning ? 'pending' : ''}`}>
           <span className="m small">Получаешь</span>
-          {target ? <><GiftArt kind={target} size={88} animate={fx === 'win'} /><b>{GIFTS[target]?.name}</b><span className="gold">≈ {money(prices[target])} ⭐</span></> : <b className="m">{has ? 'Выше нет' : '—'}</b>}
+          {target ? <><GiftArt kind={target} size={88} animate={fx === 'win'} /><b>{GIFTS[target]?.name}</b><span className="gold">≈ {cfmt(prices[target])}</span></> : <b className="m">{has ? 'Выше нет' : '—'}</b>}
           {fx === 'win' && <Burst key="w" type="gold" n={90} />}
         </div>
       </div>
@@ -300,7 +317,7 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
               {allTargets.map(k => { const c = upgradeChance(curPrice, prices[k]); return (
                 <button key={k} className={k === target ? 'on' : ''} onClick={() => { setTarget(k); setTpicker(false); setRes(null); play.click() }}>
                   <GiftArt kind={k} size={44} glow={false} />
-                  <span><b>{GIFTS[k]?.name}{GIFTS[k]?.nft ? ' · редкий' : ''}</b><i>{money(prices[k])} ⭐ · ×{(prices[k] / curPrice).toFixed(1).replace('.', ',')}</i></span>
+                  <span><b>{GIFTS[k]?.name}{GIFTS[k]?.nft ? ' · редкий' : ''}</b><i>{cfmt(prices[k])} · ×{(prices[k] / curPrice).toFixed(1).replace('.', ',')}</i></span>
                   <em className={`chance ${c < 0.01 ? 'tiny' : ''}`}>{pct(c)}%</em>
                 </button>) })}
             </div>
@@ -315,18 +332,18 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
               <button className={ptab === 'mine' ? 'on' : ''} onClick={() => setPtab('mine')}>Мои подарки · {gifts.length}</button>
               <button className={ptab === 'market' ? 'on' : ''} onClick={() => setPtab('market')}>Маркет</button>
             </div>
-            <p className="m small center">Выбрано: {chosen.length} из {MAX_UPG}{has ? ` · ${money(curPrice)} ⭐` : ''}. Можно отдать несколько подарков сразу.</p>
+            <p className="m small center">Выбрано: {chosen.length} из {MAX_UPG}{has ? ` · ${cfmt(curPrice)}` : ''}. Можно отдать несколько подарков сразу.</p>
             <div className="sheet-list">
               {ptab === 'mine' && (gifts.length
                 ? gifts.map(x => (
                   <button key={x.uid} className={sel.includes(x.uid) ? 'on' : ''} onClick={() => toggle(x.uid)}>
-                    <GiftArt kind={x.kind} size={44} glow={false} /><span><b>{GIFTS[x.kind]?.name} #{x.num}</b><i>{money(prices[x.kind])} ⭐</i></span>
+                    <GiftArt kind={x.kind} size={44} glow={false} /><span><b>{GIFTS[x.kind]?.name} #{x.num}</b><i>{cfmt(prices[x.kind])}</i></span>
                     <em className="chk">{sel.includes(x.uid) ? '✓' : ''}</em>
                   </button>))
                 : <p className="m small center">Подарков пока нет. Купи на маркете.</p>)}
               {ptab === 'market' && market.map(k => (
                 <button key={k} disabled={ctx.save.balance < prices[k] || sel.length >= MAX_UPG} onClick={() => buyPick(k)}>
-                  <GiftArt kind={k} size={44} glow={false} /><span><b>{GIFTS[k]?.name}</b><i>Купить за {money(prices[k])}</i></span>
+                  <GiftArt kind={k} size={44} glow={false} /><span><b>{GIFTS[k]?.name}</b><i>Купить за {cfmt(prices[k])}</i></span>
                 </button>))}
             </div>
             <div className="two">
@@ -376,7 +393,7 @@ export function Storm({ ctx }: { ctx: Ctx }) {
     if (stormTotal(final, stake) > 0 && rnd() < ctx.tilt() * 1.5) final = gen()
     setStrips(cols.map((cur, c) => [...cur, ...Array.from({ length: 12 }, pickSymbol), ...final[c]]))
     setSpinId(i => i + 1)
-    for (let c = 0; c < 5; c++) timers.current.push(window.setTimeout(() => play.stop(), 900 + c * 280))
+    for (let c = 0; c < 5; c++) timers.current.push(window.setTimeout(() => play.lock(), 900 + c * 280))
     timers.current.push(window.setTimeout(() => { setCols(final); setStrips(null); setBusy(false); settle(final) }, 900 + 4 * 280 + 120))
   }
   const settle = (f: string[][]) => {
@@ -410,9 +427,9 @@ export function Storm({ ctx }: { ctx: Ctx }) {
         <div className="pt-grid">{SYMBOLS.map(sy => <div key={sy}><span className="pt-sym"><SlotSym s={sy} /></span><small>3 · ×{STORM_PAY(sy, 3)}</small><small>4 · ×{STORM_PAY(sy, 4)}</small><small>5 · ×{STORM_PAY(sy, 5)}</small></div>)}</div>
         <p className="m small">Множители на ставку линии (ставка делится на 9 линий).</p>
       </details>
-      {win > 0 ? <Result good>Выигрыш +{money(shown)}</Result> : <p className="m small center">9 линий, выигрыш от 3 одинаковых символов слева направо. Ставка делится на линии.</p>}
+      {win > 0 ? <Result good>Выигрыш +{cfmt(shown)}</Result> : <p className="m small center">9 линий, выигрыш от 3 одинаковых символов слева направо. Ставка делится на линии.</p>}
       <StakeInput value={stake} onChange={setStake} balance={ctx.save.balance} disabled={busy} />
-      <button className="cta" disabled={busy} onClick={spin}>{busy ? 'Барабаны крутятся…' : `Спин · ${money(stake)}`}</button>
+      <button className="cta" disabled={busy} onClick={spin}>{busy ? 'Барабаны крутятся…' : `Спин · ${cfmt(stake)}`}</button>
     </div>
   )
 }
@@ -437,7 +454,7 @@ export function Slots({ ctx }: { ctx: Ctx }) {
     const iv = window.setInterval(() => setReels(r => r.map((s, i) => st[i] ? s : pickSymbol())), 60)
     timers.current.push(iv)
     final.forEach((s, i) => timers.current.push(window.setTimeout(() => {
-      st[i] = true; play.stop()
+      st[i] = true; play.lock()
       setReels(r => r.map((x, j) => j === i ? s : x)); setStopped([...st])
       if (i === 2) {
         clearInterval(iv)
@@ -460,9 +477,9 @@ export function Slots({ ctx }: { ctx: Ctx }) {
       <details className="paytable"><summary>Таблица выплат</summary>
         <div className="pt-grid">{SYMBOLS.map(sy => <div key={sy}><span className="pt-sym"><SlotSym s={sy} /></span><small>3 · ×{SLOT3_PAY(sy)}</small></div>)}</div>
       </details>
-      {win ? <Result good>Выигрыш +{money(shown)}</Result> : <p className="m small center">Три одинаковых символа дают выигрыш. Самый редкий символ — бриллиант.</p>}
+      {win ? <Result good>Выигрыш +{cfmt(shown)}</Result> : <p className="m small center">Три одинаковых символа дают выигрыш. Самый редкий символ — бриллиант.</p>}
       <StakeInput value={stake} onChange={setStake} balance={ctx.save.balance} disabled={busy} presets={[5, 20, 100, 500]} />
-      <button className="cta" disabled={busy} onClick={spin}>{busy ? 'Крутится…' : `Спин · ${money(stake)}`}</button>
+      <button className="cta" disabled={busy} onClick={spin}>{busy ? 'Крутится…' : `Спин · ${cfmt(stake)}`}</button>
     </div>
   )
 }
@@ -470,16 +487,60 @@ export function Slots({ ctx }: { ctx: Ctx }) {
 // ---------- КЕЙС (лента-рулетка, можно открыть сразу несколько) ----------
 const CELL = 100
 const QTYS = [1, 3, 5, 10]
+// Лента рулетки заполняется подарками почти в пропорции их шансов (корень сглаживает, чтобы лента не была пустой): главный приз мелькает редко
+const fillOf = (C: { pool: string[]; weights: number[] }) => weighted(C.pool, C.weights.map(w => Math.sqrt(w)))
+const REEL_H = 92
+function MultiReels({ kinds, C, onStop, onDone }: { kinds: GiftKind[]; C: { pool: string[]; weights: number[]; color: string }; onStop: (i: number) => void; onDone: () => void }) {
+  const strips = useMemo(() => kinds.map(k => { const s = Array.from({ length: 26 }, () => fillOf(C)); s[22] = k; return s }), [kinds]) // eslint-disable-line react-hooks/exhaustive-deps
+  const [go, setGo] = useState(false)
+  const cb = useRef({ onStop, onDone }); cb.current = { onStop, onDone }
+  useEffect(() => {
+    const a = requestAnimationFrame(() => requestAnimationFrame(() => setGo(true)))
+    const ts: number[] = []
+    const D = 2300, GAP = Math.min(380, 2600 / kinds.length)
+    kinds.forEach((_, i) => ts.push(window.setTimeout(() => cb.current.onStop(i), D + i * GAP)))
+    ts.push(window.setTimeout(() => cb.current.onDone(), D + (kinds.length - 1) * GAP + 650))
+    const tk = window.setInterval(() => play.roll(), 90); ts.push(tk)
+    ts.push(window.setTimeout(() => clearInterval(tk), D + (kinds.length - 1) * GAP))
+    return () => { cancelAnimationFrame(a); ts.forEach(t => { clearTimeout(t); clearInterval(t) }) }
+  }, [kinds]) // eslint-disable-line react-hooks/exhaustive-deps
+  const GAP = Math.min(380, 2600 / kinds.length)
+  return (
+    <div className="mreels" style={{ ['--cc' as string]: C.color }}>
+      {strips.map((s, i) => (
+        <div key={i} className="mreel" style={{ height: REEL_H }}>
+          <div className="mreel-strip" style={{ transform: `translateY(${go ? -22 * REEL_H : 0}px)`, transition: go ? `transform ${2.3 + i * GAP / 1000}s cubic-bezier(.12,.7,.12,1)` : 'none' }}>
+            {s.map((k, j) => <div key={j} style={{ height: REEL_H }}><GiftArt kind={k} size={62} glow={false} /></div>)}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function StaticReels({ n, C }: { n: number; C: { pool: string[]; weights: number[]; color: string } }) {
+  const kinds = useMemo(() => Array.from({ length: n }, () => fillOf(C)), [n]) // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="mreels idle" style={{ ['--cc' as string]: C.color }}>
+      {kinds.map((k, i) => <div key={i} className="mreel" style={{ height: REEL_H }}><div className="mreel-static"><GiftArt kind={k} size={62} glow={false} /></div></div>)}
+    </div>
+  )
+}
+
 export function Cases({ ctx, caseId }: { ctx: Ctx; caseId?: string | null }) {
-  const C = CASES.find(c => c.id === caseId) || CASES[0] || { id: '', name: '', color: '#fff', pool: [] as string[], weights: [] as number[], price: 0, ev: 0 }
+  const C = CASES.find(c => c.id === caseId) || CASES[0] || { id: '', name: '', cat: '', color: '#fff', pool: [] as string[], weights: [] as number[], price: 0, ev: 0, jp: '', jpChance: 0 }
   const [phase, setPhase] = useState<'idle' | 'shake' | 'roll' | 'done'>('idle')
-  const [strip, setStrip] = useState<GiftKind[]>(() => Array.from({ length: 12 }, () => C.pool[rint(C.pool.length)]))
+  const [strip, setStrip] = useState<GiftKind[]>(() => Array.from({ length: 12 }, () => fillOf(C)))
   const [x, setX] = useState(0)
   const [anim, setAnim] = useState(false)
   const [win, setWin] = useState(36)
   const [got, setGot] = useState<Gift | null>(null)
   const [qty, setQty] = useState(1)               // сколько кейсов открыть за раз
   const [multi, setMulti] = useState<Gift[] | null>(null)
+  const [reels, setReels] = useState<{ kinds: GiftKind[]; gifts: Gift[] } | null>(null)
+  const owed = useRef<string | null>(null)
+  const ctxRef = useRef(ctx); ctxRef.current = ctx
+  useEffect(() => () => { if (owed.current) { const k = owed.current; owed.current = null; ctxRef.current.addGift(k, 'Кейс — подарок') } }, [])
   const [spent, setSpent] = useState(0)
   const [fast, setFast] = useState(false) // быстрое открытие без рулетки
   const view = useRef<HTMLDivElement>(null)
@@ -510,65 +571,80 @@ export function Cases({ ctx, caseId }: { ctx: Ctx; caseId?: string | null }) {
     if (qty > 1) { // несколько кейсов сразу: все подарки выпадают разом, без рулетки
       const kinds = Array.from({ length: qty }, () => weighted(C.pool, C.weights))
       ctx.tally(0, kinds.reduce((a, k) => a + (prices[k] || 0), 0))
-      setGot(null); setPhase('shake'); play.whoosh()
+      setGot(null); setPhase('shake'); play.creak()
       const ready = Promise.race([Promise.all([...new Set(kinds)].map(k => preloadGift(k, false))), new Promise(r => timers.current.push(window.setTimeout(r, 1500)))])
       const minWait = new Promise(r => timers.current.push(window.setTimeout(r, 900)))
       Promise.all([ready, minWait]).then(() => {
-        if (!alive.current) { kinds.forEach(k => ctx.addGift(k, 'Кейс — подарок')); return } // вышли из экрана: подарки всё равно выдаём
-        setMulti(kinds.map(k => ctx.addGift(k, 'Кейс — подарок'))); setPhase('done'); play.big()
+        const gifts = kinds.map(k => ctx.addGift(k, 'Кейс — подарок')) // подарки выдаются сразу, анимация только показывает результат
+        if (!alive.current) return
+        setReels({ kinds, gifts }); setPhase('roll'); play.rev()
       })
       return
     }
 
     const kind = weighted(C.pool, C.weights) // шансы ровно те, что показаны в списке «Что внутри»
     ctx.tally(0, prices[kind] || 0)
-    if (fast) { setGot(ctx.addGift(kind, 'Кейс — подарок')); setPhase('done'); play.big(); return }
+    if (fast) { setGot(ctx.addGift(kind, 'Кейс — подарок')); setPhase('done'); caseSound(kind); return }
 
     // Новая лента продолжает старую: видимые сейчас подарки остаются на тех же местах, поэтому ничего не пропадает и не мигает
     const KEEP = 10, WIN = KEEP + 30
     const a = Math.max(0, Math.floor(-x / CELL))
     const keep = strip.slice(a, a + KEEP)
-    while (keep.length < KEEP) keep.push(C.pool[rint(C.pool.length)])
-    const s = [...keep, ...Array.from({ length: 40 }, () => C.pool[rint(C.pool.length)])]
+    while (keep.length < KEEP) keep.push(fillOf(C))
+    const s = [...keep, ...Array.from({ length: 40 }, () => fillOf(C))]
     s[WIN] = kind
     const off = Math.min(0, x + a * CELL)
-    setGot(null); setPhase('shake'); play.whoosh()
+    setGot(null); setPhase('shake'); play.creak()
 
     // пока кейс трясётся, подгружаем картинки и анимации новых подарков (не дольше 1,5 с)
     const ready = Promise.race([Promise.all([...new Set(s)].map(k => preloadGift(k, k === kind))), new Promise(r => timers.current.push(window.setTimeout(r, 1500)))])
     const minWait = new Promise(r => timers.current.push(window.setTimeout(r, 700)))
     Promise.all([ready, minWait]).then(() => {
       if (!alive.current) { ctx.addGift(kind, 'Кейс — подарок'); return }
+      owed.current = kind
       setAnim(false); setStrip(s); setX(off); setWin(WIN)
       requestAnimationFrame(() => requestAnimationFrame(() => {
         if (!alive.current) { ctx.addGift(kind, 'Кейс — подарок'); return }
         const vw = view.current?.clientWidth || 340
         const final = -(WIN * CELL + CELL / 2 - vw / 2 + (rnd() - 0.5) * (CELL * 0.6))
-        setPhase('roll'); setAnim(true); setX(final)
+        setPhase('roll'); setAnim(true); setX(final); owed.current = kind
         timers.current.push(window.setTimeout(() => {
-          setGot(ctx.addGift(kind, 'Кейс — подарок')); setPhase('done'); play.big()
+          owed.current = null; setGot(ctx.addGift(kind, 'Кейс — подарок')); setPhase('done'); caseSound(kind)
         }, 5400))
       }))
     })
   }
+  const caseSound = (kind: string) => { const v = ctx.save.prices[kind] || 0; if (kind === C.jp && C.jpChance < 3) play.jackpot(); else if (v >= C.price * 5) play.big(); else if (v >= C.price) play.chime(2); else play.chime(1) }
   const busy = phase === 'shake' || phase === 'roll'
   const multiWorth = multi ? multi.reduce((a, g) => a + (ctx.save.prices[g.kind] || 0), 0) : 0
   const multiSell = multi ? multi.reduce((a, g) => a + Math.floor((ctx.save.prices[g.kind] || 0) * SELL_RATE), 0) : 0
   return (
     <div className="cases">
-      {multi
+      {C.jp && GIFTS[C.jp] && <div className="jp-box" style={{ ['--cc' as string]: C.color }}>
+        <GiftArt kind={C.jp} size={54} glow={false} />
+        <div><small>Главный приз</small><b>{GIFTS[C.jp].name}</b><span>≈{cfmt(GIFTS[C.jp].base)} · ×{(GIFTS[C.jp].base / Math.max(1, C.price)).toFixed(GIFTS[C.jp].base / Math.max(1, C.price) >= 10 ? 0 : 1).replace('.', ',')} от цены кейса</span></div>
+        <i>{pctText(C.jpChance)}</i>
+      </div>}
+      {'pAbove' in C && C.pAbove > 0 && <p className="up-chance">Шанс выбить подарок дороже кейса: <b>{pctText(C.pAbove)}</b>{C.pAbove - C.pBig > 0.5 && <> · дороже вдвое: <b>{pctText(C.pBig)}</b></>}</p>}
+      {reels && phase === 'roll'
+        ? <MultiReels kinds={reels.kinds} C={C} onStop={i => { const v = ctx.save.prices[reels.kinds[i]] || 0; v >= C.price * 2 ? play.sparkle() : play.lock() }} onDone={() => { const gs = reels.gifts; setReels(null); setMulti(gs); setPhase('done'); const tot = gs.reduce((s, x) => s + (ctx.save.prices[x.kind] || 0), 0); if (gs.some(x => x.kind === C.jp && C.jpChance < 3)) play.jackpot(); else if (tot >= C.price * gs.length) play.big(); else play.chime(1) }} />
+        : multi
         ? <div className="multi-grid" style={{ ['--cc' as string]: C.color }}>
           {multi.map((g, i) => {
             const pr = ctx.save.prices[g.kind] || 0
             return <div key={g.uid} className={`multi-item ${pr > C.price ? 'up' : ''}`} style={{ animationDelay: `${i * 0.08}s` }}>
               <GiftArt kind={g.kind} size={56} />
               <b>{GIFTS[g.kind]?.name}</b>
-              <span className="gold">{money(pr)}</span>
+              <span className="gold">{cfmt(pr)}</span>
             </div>
           })}
           <Burst key={multi[0]?.uid} type="confetti" n={90} />
         </div>
-        : <div className={`roll-view ${phase}`} ref={view}>
+        : qty > 1
+          ? <StaticReels n={qty} C={C} />
+          : fast
+            ? <div className="fast-slot" style={{ ['--cc' as string]: C.color }}>{got ? <><GiftArt kind={got.kind} size={84} /><b>{GIFTS[got.kind]?.name}</b></> : <i>?</i>}</div>
+          : <div className={`roll-view ${phase}`} ref={view}>
           <div className="roll-marker" />
           <div ref={track} className="roll-track" style={{ transform: `translateX(${x}px)`, transition: anim ? 'transform 5.2s cubic-bezier(.08,.6,.06,1)' : 'none' }}>
             {strip.map((k, i) => (
@@ -577,27 +653,27 @@ export function Cases({ ctx, caseId }: { ctx: Ctx; caseId?: string | null }) {
               </div>
             ))}
           </div>
-          {phase === 'done' && <Burst key="d" type="confetti" n={90} />}
+          {phase === 'done' && <Burst key="d" type="confetti" n={got && got.kind === C.jp && C.jpChance < 3 ? 260 : 90} />}
         </div>}
       {multi
-        ? <Result good={multiWorth >= spent}>Выпало {multi.length} · ≈{money(multiWorth)} ⭐ (потрачено {money(spent)})</Result>
+        ? <Result good={multiWorth >= spent}>Выпало {multi.length} · ≈{cfmt(multiWorth)} (потрачено {cfmt(spent)})</Result>
         : got
-          ? <Result good>Выпало: {GIFTS[got.kind]?.name} #{got.num} · ≈{money(ctx.save.prices[got.kind])} ⭐</Result>
+          ? <Result good>{got.kind === C.jp && C.jpChance < 3 ? 'ДЖЕКПОТ! ' : (ctx.save.prices[got.kind] || 0) >= C.price * 5 ? 'Крупный выигрыш! ' : ''}Выпало: {GIFTS[got.kind]?.name} #{got.num} · ≈{cfmt(ctx.save.prices[got.kind])}</Result>
           : <p className="m small center">Внутри один из {C.pool.length} подарков. Чаще всего {GIFTS[C.pool[0]]?.name} ({caseOddsOf(C, 0).toFixed(0)}%), реже всего {GIFTS[C.pool[C.pool.length - 1]]?.name} ({caseOddsOf(C, C.pool.length - 1).toFixed(2).replace('.', ',')}%).</p>}
       <div className="optrow"><span className="m small">Открыть сразу</span>
         {QTYS.map(v => <button key={v} className={qty === v ? 'on' : ''} disabled={busy} onClick={() => { setQty(v); play.click() }}>×{v}</button>)}
       </div>
       {qty === 1 && <label className="fastopt"><input type="checkbox" checked={fast} disabled={busy} onChange={e => setFast(e.target.checked)} /> Быстрое открытие</label>}
-      {multi && !busy && <button className="cta ghost" onClick={() => { ctx.pay(multiSell, `Продажа — кейсы ×${multi.length}`); multi.forEach(g => ctx.removeGift(g.uid)); setMulti(null); setPhase('idle'); play.coin() }}>Продать все за {money(multiSell)}</button>}
-      {got && !busy && <button className="cta ghost" onClick={() => { const v = Math.floor(ctx.save.prices[got.kind] * SELL_RATE); ctx.removeGift(got.uid); ctx.pay(v, `Продажа — ${GIFTS[got.kind]?.name}`); setGot(null); setPhase('idle'); play.coin() }}>Продать за {money(Math.floor(ctx.save.prices[got.kind] * SELL_RATE))}</button>}
-      <button className="cta" disabled={busy || ctx.save.balance < C.price * qty} onClick={open}>{busy ? 'Открываем…' : `Открыть${qty > 1 ? ` ×${qty}` : ''} · ${money(C.price * qty)}`}</button>
+      {multi && !busy && <button className="cta ghost" onClick={() => { ctx.pay(multiSell, `Продажа — кейсы ×${multi.length}`); multi.forEach(g => ctx.removeGift(g.uid)); setMulti(null); setPhase('idle'); play.coin() }}>Продать все за {cfmt(multiSell)}</button>}
+      {got && !busy && <button className="cta ghost" onClick={() => { const v = Math.floor(ctx.save.prices[got.kind] * SELL_RATE); ctx.removeGift(got.uid); ctx.pay(v, `Продажа — ${GIFTS[got.kind]?.name}`); setGot(null); setPhase('idle'); play.coin() }}>Продать за {cfmt(Math.floor(ctx.save.prices[got.kind] * SELL_RATE))}</button>}
+      <button className="cta" disabled={busy || ctx.save.balance < C.price * qty} onClick={open}>{busy ? 'Открываем…' : `Открыть${qty > 1 ? ` ×${qty}` : ''} · ${cfmt(C.price * qty)}`}</button>
       <h3 className="sub-title">Что внутри · {C.name}</h3>
       <div className="case-items">
         {C.pool.map((k, i) => ({ k, i })).sort((a, b) => GIFTS[b.k].base - GIFTS[a.k].base).map(({ k, i }) => (
           <div key={k} className={`case-item ${GIFTS[k].base > C.price ? 'up' : ''}`}>
             <GiftArt kind={k} size={52} glow={false} />
             <b>{GIFTS[k].name}</b>
-            <span className="gold">{money(GIFTS[k].base)}</span>
+            <span className="gold">{cfmt(GIFTS[k].base)}</span>
             <i>{caseOddsOf(C, i) < 1 ? caseOddsOf(C, i).toFixed(2).replace('.', ',') : caseOddsOf(C, i).toFixed(1).replace('.', ',')}%</i>
           </div>
         ))}
@@ -627,7 +703,7 @@ export function Mines({ ctx }: { ctx: Ctx }) {
     setOpen(o => [...o, i])
     if (!bombs!.has(i) && open.length >= 1 && rnd() < ctx.tilt() * 0.35) { const nb = new Set(bombs!); nb.add(i); setBombs(nb); bombs!.add(i) }
     if (bombs!.has(i)) { setOver('boom'); play.boom(); play.lose(); ctx.notify('Мина! Ставка сгорела'); return }
-    play.flip(); play.coin()
+    play.ding(open.length)
     if (open.length + 1 === MINES_TOTAL - bn) cashOut(open.length + 1)
   }
   const cashOut = (k = open.length) => {
@@ -651,15 +727,15 @@ export function Mines({ ctx }: { ctx: Ctx }) {
         {over === 'boom' && <Burst key="boom" type="ember" n={80} />}
         {over === 'cash' && <Burst key="cash" type="gold" n={80} />}
       </div>
-      <p className="m small center">Мин: {bn}. Сейчас ×{mult.toFixed(2)}{active && open.length ? ` · забрать ${money(Math.floor(stake * mult))}` : ''}</p>
-      {over === 'cash' && <Result good>Забрано +{money(Math.floor(stake * mult))}</Result>}
+      <p className="m small center">Мин: {bn}. Сейчас ×{mult.toFixed(2)}{active && open.length ? ` · забрать ${cfmt(Math.floor(stake * mult))}` : ''}</p>
+      {over === 'cash' && <Result good>Забрано +{cfmt(Math.floor(stake * mult))}</Result>}
       <div className="optrow"><span className="m small">Мин</span>
         {[1, 3, 5, 8, 12].map(v => <button key={v} className={bn === v ? 'on' : ''} disabled={active} onClick={() => setBn(v)}>{v}</button>)}
       </div>
       <StakeInput value={stake} onChange={setStake} balance={ctx.save.balance} disabled={active} />
       {active
-        ? <button className="cta green" disabled={!open.length} onClick={() => cashOut()}>Забрать {money(Math.floor(stake * mult))}</button>
-        : <button className="cta" onClick={start}>{bombs ? 'Новый раунд' : 'Начать'} · {money(stake)}</button>}
+        ? <button className="cta green" disabled={!open.length} onClick={() => cashOut()}>Забрать {cfmt(Math.floor(stake * mult))}</button>
+        : <button className="cta" onClick={start}>{bombs ? 'Новый раунд' : 'Начать'} · {cfmt(stake)}</button>}
     </div>
   )
 }
@@ -764,7 +840,7 @@ export function Plinko({ ctx }: { ctx: Ctx }) {
     const f = (now: number) => {
       const el = (now - t0) / 1000
       // удары по колышкам: подсветка и тик
-      while (hit < segs.length && segs[hit].peg && el >= segs[hit].t0 + segs[hit].dur) { setHot(segs[hit].peg!); hotAt = el; play.tick(); hit++ }
+      while (hit < segs.length && segs[hit].peg && el >= segs[hit].t0 + segs[hit].dur) { setHot(segs[hit].peg!); hotAt = el; play.bounce(hit); hit++ }
       if (hit < segs.length && !segs[hit].peg) hit = segs.length
       if (hotAt >= 0 && el - hotAt > 0.12) { hotAt = -1; setHot(null) }
       const p = place(Math.min(el, END))
@@ -813,13 +889,13 @@ export function Plinko({ ctx }: { ctx: Ctx }) {
           <circle cx={ball.x} cy={ball.y} r="9" fill="#FFC24B" opacity=".22" /><circle cx={ball.x} cy={ball.y} r="5.6" fill="url(#pb)" />
         </>}
       </svg>
-      {landed !== null && <Result good={MULTS[landed] >= 1}>×{MULTS[landed]} · {MULTS[landed] >= 1 ? '+' : ''}{money(Math.floor(stake * MULTS[landed]))}</Result>}
+      {landed !== null && <Result good={MULTS[landed] >= 1}>×{MULTS[landed]} · {MULTS[landed] >= 1 ? '+' : ''}{cfmt(Math.floor(stake * MULTS[landed]))}</Result>}
       <div className="optrow"><span className="m small">Риск</span>
         {([['low', 'Низкий'], ['mid', 'Средний'], ['high', 'Высокий']] as [PlinkoRisk, string][]).map(([v, t]) => <button key={v} className={risk === v ? 'on' : ''} disabled={busy} onClick={() => setRisk(v)}>{t}</button>)}
       </div>
       <StakeInput value={stake} onChange={setStake} balance={ctx.save.balance} disabled={busy} />
-      <button className="cta" disabled={busy} onClick={drop}>{busy ? 'Шар падает…' : `Бросить · ${money(stake)}`}</button>
-      <p className="m small center">На каждом колышке шар уходит влево или вправо с шансом 50/50. Отдача игроку ниже 100%: у казино всегда небольшой плюс.</p>
+      <button className="cta" disabled={busy} onClick={drop}>{busy ? 'Шар падает…' : `Бросить · ${cfmt(stake)}`}</button>
+      <p className="m small center">На каждом колышке шар уходит влево или вправо с шансом 50/50.</p>
     </div>
   )
 }
@@ -852,9 +928,9 @@ export function Blackjack({ ctx }: { ctx: Ctx }) {
     const ps = score(p), ds = score(d)
     let pay = 0, text = ''
     if (ps > 21) text = 'Перебор'
-    else if (natural && ds !== 21) { pay = Math.floor(bet * 2.5); text = 'Блэкджек!' }
+    else if (natural && ds !== 21) { pay = Math.floor(bet * 2.2); text = 'Блэкджек!' }
     else if (ds > 21 || ps > ds) { pay = bet * 2; text = 'Победа' }
-    else if (ps === ds) { pay = bet; text = 'Ничья, ставка возвращена' }
+    else if (ps === ds) { pay = ps === 21 ? bet : 0; text = ps === 21 ? 'Ничья, ставка возвращена' : 'Ничья: выигрывает дилер' }
     else text = 'Проигрыш'
     setMsg(text); setPhase('done')
     if (pay > bet) play.big(); else if (pay === 0) play.lose()
@@ -862,7 +938,7 @@ export function Blackjack({ ctx }: { ctx: Ctx }) {
   }
   const deal = () => {
     if (!ctx.charge(stake, 'Блэкджек — ставка')) return
-    ctx.bump('blackjack'); play.flip()
+    ctx.bump('blackjack'); play.card()
     const d = mkDeck()
     const p = [d.pop()!, d.pop()!], dl = [d.pop()!, d.pop()!]
     if (rnd() < ctx.tilt() * 0.5) { const bi = d.reduce((m, c, i) => (c.v > d[m].v ? i : m), 0); if (d[bi].v > dl[1].v) [dl[1], d[bi]] = [d[bi], dl[1]] } // скрытая карта дилера
@@ -871,13 +947,13 @@ export function Blackjack({ ctx }: { ctx: Ctx }) {
   }
   const hit = () => {
     const d = [...deck], p = [...pl, d.pop()!]
-    play.flip(); setDeck(d); setPl(p)
+    play.card(); setDeck(d); setPl(p)
     if (score(p) >= 21) stand(p, d)
   }
   const dbl = () => {
     if (pl.length !== 2 || !ctx.charge(locked, 'Блэкджек — удвоение', false)) return
     const d = [...deck], p = [...pl, d.pop()!]
-    play.flip(); setDeck(d); setPl(p); setLocked(locked * 2)
+    play.card(); setDeck(d); setPl(p); setLocked(locked * 2)
     stand(p, d, locked * 2)
   }
   const stand = (p = pl, d0 = deck, bet = locked) => {
@@ -893,12 +969,12 @@ export function Blackjack({ ctx }: { ctx: Ctx }) {
         <div className="hand"><span className="m small">Ты {pl.length ? score(pl) : ''}</span>
           <div className="cards">{pl.map((c, i) => <CardView key={`${i}${c.r}${c.s}`} c={c} i={i} />)}</div></div>
       </div>
-      {msg && <Result good={/Победа|Блэкджек/.test(msg)}>{msg}</Result>}
+      {msg && <Result good={/Победа|Блэкджек!/.test(msg)}>{msg}</Result>}
       {phase !== 'play' && <StakeInput value={stake} onChange={setStake} balance={ctx.save.balance} />}
       {phase === 'play'
         ? <div className="two three"><button className="cta ghost" onClick={hit}>Ещё</button><button className="cta" onClick={() => stand()}>Хватит</button><button className="cta gold" disabled={pl.length !== 2 || ctx.save.balance < locked} onClick={dbl}>×2</button></div>
-        : <button className="cta" onClick={deal}>Раздать · {money(stake)}</button>}
-      <p className="m small center">Блэкджек платит 3:2, дилер берёт до 17.</p>
+        : <button className="cta" onClick={deal}>Раздать · {cfmt(stake)}</button>}
+      <p className="m small center">Блэкджек платит 6:5, дилер берёт до 17, при равных очках (кроме 21) выигрывает дилер.</p>
     </div>
   )
 }
@@ -906,7 +982,7 @@ export function Blackjack({ ctx }: { ctx: Ctx }) {
 // ---------- ОСОБНЯК (этажи с призраками) ----------
 // На каждом этаже n дверей, за одной из них призрак. Прошёл этаж: множитель растёт. Можно забрать выигрыш на любом этаже.
 // Шанс пройти этаж (n-1)/n, множитель после k этажей = 90% · (n/(n-1))^k, поэтому отдача при любой стратегии ровно 90%.
-const HOUSE_RTP = 0.9
+const HOUSE_RTP = 0.84
 const floorsFor = (n: number) => (n === 2 ? 5 : n === 3 ? 6 : 7) // с двумя дверями множители растут быстрее, поэтому этажей меньше: максимум около ×29
 
 function MansionRoof({ glow, scared }: { glow: boolean; scared: boolean }) {
@@ -970,9 +1046,9 @@ export function Mansion({ ctx }: { ctx: Ctx }) {
     if (!playing) return
     const ghost = rint(n) // призрак выбирает дверь случайно и поровну, шанс каждой двери 1/n
     setMarks(m => [...m, { pick: d, ghost }])
-    if (d === ghost) { setPhase('lose'); play.boom(); play.lose(); ctx.notify('За дверью призрак! Ставка сгорела'); return }
+    if (d === ghost) { setPhase('lose'); play.ghost(); play.boom(); play.lose(); ctx.notify('За дверью призрак! Ставка сгорела'); return }
     const nf = floor + 1
-    setFloor(nf); play.coin()
+    setFloor(nf); play.door(); play.ding(nf)
     if (nf === FL) finishWin(nf)
   }
   const cashOut = () => { if (playing && floor > 0) finishWin(floor) }
@@ -1014,19 +1090,19 @@ export function Mansion({ ctx }: { ctx: Ctx }) {
       </div>
 
       {phase === 'idle' && <p className="m small center">Призрак прячется за одной из {n} дверей на каждом этаже. Поднимайся вверх: чем выше, тем больше множитель.</p>}
-      {playing && <p className="m small center">Этаж {floor + 1} из {FL} · сейчас <b className="gold">×{fmt(mult(floor))}</b>{floor > 0 ? ` · можно забрать ${money(Math.floor(locked * mult(floor)))} ⭐` : ''}</p>}
-      {phase === 'win' && <Result good>{floor === FL ? 'Чердак покорён! ' : 'Забрал вовремя: '}+{money(won)} ⭐ · ×{fmt(mult(floor))}</Result>}
-      {phase === 'lose' && <Result>Призрак на {floor + 1}-м этаже. Ставка {money(locked)} ⭐ сгорела</Result>}
+      {playing && <p className="m small center">Этаж {floor + 1} из {FL} · сейчас <b className="gold">×{fmt(mult(floor))}</b>{floor > 0 ? ` · можно забрать ${cfmt(Math.floor(locked * mult(floor)))}` : ''}</p>}
+      {phase === 'win' && <Result good>{floor === FL ? 'Чердак покорён! ' : 'Забрал вовремя: '}+{cfmt(won)} · ×{fmt(mult(floor))}</Result>}
+      {phase === 'lose' && <Result>Призрак на {floor + 1}-м этаже. Ставка {cfmt(locked)} сгорела</Result>}
 
       {!playing && <>
         <StakeInput value={stake} onChange={setStake} balance={ctx.save.balance} />
         <div className="optrow"><span className="m small">Дверей на этаже</span>
           {[2, 3, 4].map(v => <button key={v} className={n === v ? 'on' : ''} onClick={() => { setN(v); play.click() }}>{v}</button>)}
         </div>
-        <p className="m small center">Максимум ×{fmt(mult(FL))} · шанс пройти этаж {Math.round(((n - 1) / n) * 100)}% · отдача {Math.round(HOUSE_RTP * 100)}%</p>
-        <button className="cta" onClick={start}>{phase === 'idle' ? 'Войти в особняк' : 'Ещё раз'} · {money(stake)}</button>
+        <p className="m small center">Максимум ×{fmt(mult(FL))} · шанс пройти этаж {Math.round(((n - 1) / n) * 100)}%</p>
+        <button className="cta" onClick={start}>{phase === 'idle' ? 'Войти в особняк' : 'Ещё раз'} · {cfmt(stake)}</button>
       </>}
-      {playing && <button className="cta green" disabled={floor === 0} onClick={cashOut}>{floor === 0 ? 'Пройди первый этаж' : `Забрать ${money(Math.floor(locked * mult(floor)))}`}</button>}
+      {playing && <button className="cta green" disabled={floor === 0} onClick={cashOut}>{floor === 0 ? 'Пройди первый этаж' : `Забрать ${cfmt(Math.floor(locked * mult(floor)))}`}</button>}
     </div>
   )
 }
@@ -1034,12 +1110,12 @@ export function Mansion({ ctx }: { ctx: Ctx }) {
 // ---------- ГОНКИ ----------
 // Настоящий заезд: 6 машин, 3 круга по овалу. Заезд целиком просчитывается движком raceSimulate (lib.ts) до старта,
 // экран лишь проигрывает готовую запись. У машин разные характеристики, в заезде работают слипстрим, нитро и ошибки в поворотах.
-// Коэффициент = 95% ÷ шанс (шансы получены прогоном того же движка), ставка на победителя или на топ-3.
+// Коэффициент = отдача (RACE_RTP) ÷ шанс (шансы получены прогоном того же движка), ставка на победителя или на топ-3.
 const TR = { cx1: 90, cx2: 230, cy: 110, r: 70 }
 const CORNER_LEN = Math.PI * TR.r
 function trackPos(d: number, lane: number): [number, number] {
   const lp = ((d % LAP_LEN) + LAP_LEN) % LAP_LEN
-  const R = TR.r + (lane - 2.5) * 4.2
+  const R = TR.r + (lane - 2.5) * 7
   const { cx1, cx2, cy } = TR
   if (lp < 70) return [160 + lp, cy + R]
   if (lp < 70 + CORNER_LEN) { const th = Math.PI / 2 - (lp - 70) / TR.r; return [cx2 + R * Math.cos(th), cy + R * Math.sin(th)] }
@@ -1051,7 +1127,7 @@ type RaceKind = 'win' | 'top3'
 const PLAY_SPEED = 2.1 // во сколько раз запись идёт быстрее реального времени симуляции
 const evText = (e: RaceEvent) => {
   const n = RACERS[e.car].name
-  return e.kind === 'nitro' ? `${n} включает нитро` : e.kind === 'mistake' ? `${n} ошибся в повороте` : e.kind === 'lead' ? `${n} выходит вперёд`
+  return e.kind === 'luck' ? `${n} поймал удачу: рывок!` : e.kind === 'bad' ? `${n} не повезло: кочка на трассе` : e.kind === 'nitro' ? `${n} включает нитро` : e.kind === 'mistake' ? `${n} ошибся в повороте` : e.kind === 'lead' ? `${n} выходит вперёд`
     : e.kind === 'lap' ? `Круг ${e.lap} из ${RACE_LAPS}` : `${n} финиширует ${e.place}-м`
 }
 export function Race({ ctx }: { ctx: Ctx }) {
@@ -1087,21 +1163,21 @@ export function Race({ ctx }: { ctx: Ctx }) {
     const w = ok ? Math.floor(stake * o) : 0
     pending.current = { w }
     setSim(s); setSt(0); setRes(null); setPhase('count')
-    const END = s.duration + 1
+    const END = s.duration + 3
     const run = () => {
-      setPhase('run'); play.whoosh()
+      setPhase('run'); play.rev()
       const t0 = performance.now()
       let nextEv = 0
       const f = (now: number) => {
         const t = Math.min(END, ((now - t0) / 1000) * PLAY_SPEED)
         setSt(t)
-        while (nextEv < s.events.length && s.events[nextEv].t <= t) { if (s.events[nextEv].kind === 'finish') play.tick(); nextEv++ }
+        while (nextEv < s.events.length && s.events[nextEv].t <= t) { const ev = s.events[nextEv]; if (ev.kind === 'finish') play.finish(); else if (ev.kind === 'nitro') play.nitro(); else if (ev.kind === 'mistake') play.squeal(); else if (ev.kind === 'luck') play.sparkle(); else if (ev.kind === 'bad') play.thud(); else if (ev.kind === 'lap') play.bell(); nextEv++ }
         if (t >= END) {
           pending.current = null
           setPhase('done')
           setHist(h => [s.order[0], ...h].slice(0, 8))
           const win = RACERS[s.order[0]].name
-          if (w > 0) { ctx.pay(w, 'Гонки — выигрыш'); play.big(); setRes({ ok: true, text: `${RACERS[pick].name} — ${myPlace}-е место. Выигрыш +${money(w)} ⭐ (×${o.toFixed(2).replace('.', ',')})` }) }
+          if (w > 0) { ctx.pay(w, 'Гонки — выигрыш'); play.big(); setRes({ ok: true, text: `${RACERS[pick].name} — ${myPlace}-е место. Выигрыш +${cfmt(w)} (×${o.toFixed(2).replace('.', ',')})` }) }
           else { play.lose(); setRes({ ok: false, text: `Победил ${win}. ${RACERS[pick].name} финишировал ${myPlace}-м. Ставка сгорела` }) }
           return
         }
@@ -1110,8 +1186,8 @@ export function Race({ ctx }: { ctx: Ctx }) {
       raf.current = requestAnimationFrame(f)
     }
     const step = (k: number) => {
-      if (k === 0) { setCount(0); run(); return }
-      setCount(k); play.tick()
+      if (k === 0) { setCount(0); play.beep(true); run(); return }
+      setCount(k); play.beep(false)
       timers.current.push(window.setTimeout(() => step(k - 1), 800))
     }
     step(3)
@@ -1143,15 +1219,36 @@ export function Race({ ctx }: { ctx: Ctx }) {
           <g transform="translate(160 180)"><rect x="-2.500" y="-26" width="5" height="52" fill="#fff" /><rect x="-2.500" y="-26" width="5" height="52" fill="url(#rgChk)" /></g>
           <defs><pattern id="rgChk" width="5" height="10" patternUnits="userSpaceOnUse"><rect width="5" height="5" fill="#111" /><rect y="5" x="0" width="5" height="5" fill="#fff" /></pattern></defs>
           <text x="160" y="104" textAnchor="middle" fontSize="11" fontWeight="800" fill="#fff" opacity=".55">{phase === 'run' ? feed[0] ? evText(feed[0]) : '' : 'СТАРТ / ФИНИШ ↓'}</text>
-          {[...RACERS.keys()].sort((a, b) => (a === pick ? 1 : 0) - (b === pick ? 1 : 0)).map(i => {
+          {[...RACERS.keys()].sort((x, y) => (x === pick ? 1 : 0) - (y === pick ? 1 : 0)).map(i => {
             const c = RACERS[i]
-            const [x, y] = trackPos(Math.min(dist[i], RACE_LEN), i)
+            // после финиша машина катится по инерции ещё немного, а не стоит на линии
+            const roll = sim && sim.fin[i] >= 0 && st > sim.fin[i] ? Math.min(60, 60 * (1 - Math.exp(-(st - sim.fin[i]) * 1.1))) : 0
+            const d = Math.min(dist[i], RACE_LEN) + roll
+            const [x, y] = trackPos(d, i), [x2, y2] = trackPos(d + 3, i)
+            const ang = (Math.atan2(y2 - y, x2 - x) * 180) / Math.PI
             const mine = i === pick
+            const nitro = !!sim && sim.events.some(e => e.kind === 'nitro' && e.car === i && st >= e.t && st < e.t + 2)
+            const luck = !!sim && sim.events.some(e => e.kind === 'luck' && e.car === i && st >= e.t && st < e.t + 1.6)
+            const bad = !!sim && sim.events.some(e => e.kind === 'bad' && e.car === i && st >= e.t && st < e.t + 0.9)
+            const slip = !!sim && sim.events.some(e => e.kind === 'mistake' && e.car === i && st >= e.t && st < e.t + 0.9)
             return (
               <g key={c.id} transform={`translate(${x.toFixed(1)} ${y.toFixed(1)})`}>
-                {mine && <circle r="11" fill="none" stroke="#fff" strokeWidth="1.500" opacity=".85" />}
-                <circle r="7.500" fill={c.color} stroke={c.color2} strokeWidth="2" style={{ filter: `drop-shadow(0 0 4px ${c.color})` }} />
-                <text y="3.200" textAnchor="middle" fontSize="9" fontWeight="900" fill="#111">{i + 1}</text>
+                {mine && <circle r="10.500" fill="none" stroke="#fff" strokeWidth="1.400" strokeDasharray="3 2.500" opacity=".9" />}
+                <g transform={`rotate(${(ang + (slip ? Math.sin(st * 40) * 14 : 0)).toFixed(1)}) scale(.74)`}>
+                  <ellipse cx="0.500" cy="1" rx="12" ry="5.500" fill="#000" opacity=".35" />
+                  {luck && <circle r="13" fill="#7bd88f" opacity=".28"><animate attributeName="r" values="10;16;10" dur=".5s" repeatCount="indefinite" /></circle>}
+                  {bad && <circle cx="-9" r="5" fill="#8a8f94" opacity=".55"><animate attributeName="r" values="3;8;3" dur=".4s" repeatCount="indefinite" /></circle>}
+                  {nitro && <path d="M-11 0 L-22 -2.500 L-18 0 L-22 2.500Z" fill="#7bd8ff" opacity=".9"><animate attributeName="opacity" values=".4;1;.4" dur=".15s" repeatCount="indefinite" /></path>}
+                  {nitro && <path d="M-11 0 L-17 -1.200 L-15 0 L-17 1.200Z" fill="#fff" />}
+                  {[[-6.500, -5], [-6.500, 5], [6, -5], [6, 5]].map(([wx, wy], k) => <rect key={k} x={wx - 2.400} y={wy - 1.300} width="4.800" height="2.600" rx=".8" fill="#15171a" />)}
+                  <rect x="-12" y="-4.800" width="2.600" height="9.600" rx=".8" fill={c.color2} />
+                  <path d="M-10.500 -3.600 Q-10.500 -4.200 -8.500 -4.200 H3 Q8 -4 11 -1.600 V1.600 Q8 4 3 4.200 H-8.500 Q-10.500 4.200 -10.500 3.600Z" fill={c.color} stroke={c.color2} strokeWidth=".7" />
+                  <rect x="10" y="-4.700" width="2.200" height="9.400" rx=".8" fill={c.color2} />
+                  <rect x="-8" y="-.8" width="15" height="1.600" fill="#fff" opacity=".55" />
+                  <rect x="-2.500" y="-2.400" width="6" height="4.800" rx="2" fill="#0d1114" opacity=".85" />
+                  <circle cx=".500" cy="0" r="1.500" fill={c.color2} />
+                </g>
+                <text y="-8" textAnchor="middle" fontSize="6" fontWeight="900" fill="#fff" stroke="#000" strokeWidth="1.400" paintOrder="stroke">{i + 1}</text>
               </g>
             )
           })}
@@ -1185,15 +1282,137 @@ export function Race({ ctx }: { ctx: Ctx }) {
         ))}
       </div>
       <StakeInput value={stake} onChange={setStake} balance={ctx.save.balance} disabled={busy} />
-      <button className="cta" disabled={busy} onClick={go}>{busy ? (count > 0 ? `Старт через ${count}…` : 'Гонка идёт…') : `Старт · ${money(stake)} · ×${odds[pick].toFixed(2).replace('.', ',')}`}</button>
-      <p className="m small center">Заезд разыгрывается честной симуляцией: стартовая решётка случайная, сильные машины чаще побеждают, но ошибки, нитро и слипстрим дают шанс каждому. Коэффициент = 95% ÷ шанс машины (шансы посчитаны на 800 000 заездов). Отдача 95%: казино всегда в небольшом плюсе.</p>
+      <button className="cta" disabled={busy} onClick={go}>{busy ? (count > 0 ? `Старт через ${count}…` : 'Гонка идёт…') : `Старт · ${cfmt(stake)} · ×${odds[pick].toFixed(2).replace('.', ',')}`}</button>
+      <p className="m small center">Заезд разыгрывается честной симуляцией: стартовая решётка случайная, сильные машины чаще побеждают, но ошибки, нитро, слипстрим и просто удача (рывок или кочка) дают шанс каждому. Коэффициент зависит от шанса машины: чем меньше шанс, тем он выше.</p>
+    </div>
+  )
+}
+
+// ---------- БОЛЬШЕ / МЕНЬШЕ ----------
+// Выпадает целое число от 0 до 99, все числа равновероятны. Три режима: «Меньше» (число < порога), «Больше» (число ≥ порога)
+// и «Диапазон» (число внутри окна). Игрок выбирает шанс выигрыша от 2% до 80%, коэффициент = 84% ÷ шанс, округляется вниз до сотых.
+// Число выбирается один раз до анимации, никаких подстроек под игрока. Выигрыш выдаётся, даже если игрок вышел с экрана.
+const HL_RTP = 0.84
+const HL_MIN = 2, HL_MAX = 80
+type HlMode = 'under' | 'over' | 'range'
+const hlMult = (chance: number) => Math.floor(((HL_RTP * 100) / chance) * 100) / 100
+const hlZone = (mode: HlMode, c: number, lo: number): [number, number] => (mode === 'under' ? [0, c] : mode === 'over' ? [100 - c, 100] : [lo, lo + c]) // [от, до) в числах 0..99
+
+function Reel({ digit, run, dur }: { digit: number; run: number; dur: number }) {
+  const [pos, setPos] = useState(0)
+  const [anim, setAnim] = useState(false)
+  const first = useRef(true)
+  useEffect(() => {
+    if (first.current) { first.current = false; return }
+    setAnim(false); setPos(p => p % 10)
+    const a = requestAnimationFrame(() => requestAnimationFrame(() => { setAnim(true); setPos(20 + digit) }))
+    const t = window.setTimeout(() => { setAnim(false); setPos(digit) }, dur * 1000 + 120)
+    return () => { cancelAnimationFrame(a); clearTimeout(t) }
+  }, [run]) // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="hl-reel" aria-hidden="true">
+      <div className="hl-reel-strip" style={{ transform: `translateY(${-pos}em)`, transition: anim ? `transform ${dur}s cubic-bezier(.12,.72,.14,1)` : 'none' }}>
+        {Array.from({ length: 40 }, (_, i) => <span key={i}>{i % 10}</span>)}
+      </div>
+    </div>
+  )
+}
+
+export function HiLo({ ctx }: { ctx: Ctx }) {
+  const [stake, setStake] = useState(50)
+  const [mode, setMode] = useState<HlMode>('over')
+  const [chance, setChance] = useState(50)
+  const [lo, setLo] = useState(30)
+  const [digits, setDigits] = useState<[number, number]>([0, 0])
+  const [run, setRun] = useState(0)
+  const [phase, setPhase] = useState<'idle' | 'spin' | 'done'>('idle')
+  const [final, setFinal] = useState<number | null>(null)
+  const [res, setRes] = useState<{ ok: boolean; text: string; tier: number } | null>(null)
+  const [hist, setHist] = useState<{ n: number; ok: boolean }[]>([])
+  const [stat, setStat] = useState({ w: 0, l: 0, net: 0, streak: 0 })
+  const timers = useRef<number[]>([])
+  const pending = useRef<{ w: number } | null>(null)
+  const ctxRef = useRef(ctx); ctxRef.current = ctx
+  useEffect(() => () => {
+    timers.current.forEach(t => { clearTimeout(t); clearInterval(t) })
+    const p = pending.current
+    if (p) { pending.current = null; if (p.w > 0) ctxRef.current.pay(p.w, 'Больше / Меньше — выигрыш') }
+  }, [])
+  const busy = phase === 'spin'
+  const loMax = 100 - chance
+  const loEff = Math.min(lo, loMax)
+  const m = hlMult(chance)
+  const [za, zb] = hlZone(mode, chance, loEff)
+  const fm = (v: number) => v.toFixed(2).replace('.', ',')
+  const roll = () => {
+    if (busy || !ctx.charge(stake, 'Больше / Меньше — ставка')) return
+    ctx.bump('hilo'); play.click()
+    const n = rint(100)
+    const ok = n >= za && n < zb
+    const w = ok ? Math.floor(stake * m) : 0
+    pending.current = { w }
+    setPhase('spin'); setRes(null); setFinal(null)
+    setDigits([Math.floor(n / 10), n % 10]); setRun(r => r + 1)
+    play.whoosh()
+    const tick = window.setInterval(() => play.roll(), 85)
+    timers.current.push(tick)
+    timers.current.push(window.setTimeout(() => play.lock(), 1350))
+    timers.current.push(window.setTimeout(() => {
+      clearInterval(tick); play.lock()
+      pending.current = null
+      setFinal(n); setPhase('done'); setHist(h => [{ n, ok }, ...h].slice(0, 12))
+      setStat(s => ({ w: s.w + (ok ? 1 : 0), l: s.l + (ok ? 0 : 1), net: s.net + w - stake, streak: ok ? s.streak + 1 : 0 }))
+      if (ok) {
+        ctx.pay(w, 'Больше / Меньше — выигрыш')
+        const tier = m >= 10 ? 3 : m >= 4 ? 2 : 1
+        if (tier === 3) play.jackpot(); else if (tier === 2) play.big(); else play.chime(1)
+        setRes({ ok: true, tier, text: `Выпало ${n}. Выигрыш +${cfmt(w)} (×${fm(m)})` })
+      } else { play.thud(); play.lose(); setRes({ ok: false, tier: 0, text: `Выпало ${n}. Ставка сгорела` }) }
+    }, 1950))
+  }
+  const modeLabel: Record<HlMode, string> = { under: 'Меньше', over: 'Больше', range: 'Диапазон' }
+  const zoneText = mode === 'under' ? `Выигрыш при числе от 0 до ${zb - 1}` : mode === 'over' ? `Выигрыш при числе от ${za} до 99` : `Выигрыш при числе от ${za} до ${zb - 1}`
+  const grad = `linear-gradient(90deg,#b84a52 0 ${za}%,#3fc58a ${za}% ${zb}%,#b84a52 ${zb}% 100%)`
+  const winPay = Math.floor(stake * m)
+  return (
+    <div className="hilo">
+      <div className="hl-top">
+        <div className="chips">{hist.length ? hist.map((h, i) => <span key={i} className="g" style={{ color: h.ok ? '#7bd88f' : '#ff8a8a' }}>{h.n}</span>) : <span className="m small">Прошлые числа появятся здесь</span>}</div>
+        {stat.streak >= 2 && <span className="hl-streak">Серия {stat.streak}</span>}
+      </div>
+      <div className={`hl-screen ${phase} ${phase === 'done' ? (res?.ok ? 'win' : 'lose') : ''}`}>
+        <div className="hl-ring" />
+        <div className="hl-reels"><Reel digit={digits[0]} run={run} dur={1.35} /><Reel digit={digits[1]} run={run} dur={1.9} /></div>
+        <div className="hl-bar" style={{ background: grad }}>
+          <b className="hl-edge" style={{ left: `${za}%`, opacity: za > 0 ? 1 : 0 }} /><b className="hl-edge" style={{ left: `${zb}%`, opacity: zb < 100 ? 1 : 0 }} />
+          <i className="hl-mark" style={{ left: `${final === null ? 50 : final + 0.5}%`, opacity: final === null ? 0 : 1 }} />
+        </div>
+        <div className="hl-scale"><span>0</span><span>25</span><span>50</span><span>75</span><span>99</span></div>
+        <p className="hl-zone">{zoneText}</p>
+        {phase === 'done' && res?.ok && <Burst key={`hb${hist.length}`} type={res.tier === 3 ? 'confetti' : 'gold'} n={res.tier === 3 ? 200 : res.tier === 2 ? 110 : 60} />}
+      </div>
+      {res && <Result good={res.ok}>{res.text}</Result>}
+      <div className="hl-modes">{(['under', 'over', 'range'] as HlMode[]).map(k => <button key={k} className={mode === k ? 'on' : ''} disabled={busy} onClick={() => { setMode(k); play.click() }}>{modeLabel[k]}</button>)}</div>
+      <div className="hl-ctl">
+        <div className="hl-row"><span>Шанс выигрыша</span><b>{chance}%</b></div>
+        <input className="hl-range" type="range" min={HL_MIN} max={HL_MAX} step={1} value={chance} disabled={busy} onChange={e => { setChance(Number(e.target.value)); play.tick() }} aria-label="Шанс выигрыша" />
+        <div className="hl-presets">{[5, 10, 25, 50, 75].map(v => <button key={v} className={chance === v ? 'on' : ''} disabled={busy} onClick={() => { setChance(v); play.click() }}>{v}%</button>)}</div>
+        {mode === 'range' && <>
+          <div className="hl-row"><span>Начало окна</span><b>{loEff}–{loEff + chance - 1}</b></div>
+          <input className="hl-range" type="range" min={0} max={loMax} step={1} value={loEff} disabled={busy} onChange={e => { setLo(Number(e.target.value)); play.tick() }} aria-label="Начало окна" />
+        </>}
+      </div>
+      <div className="hl-info"><div><small>Коэффициент</small><b>×{fm(m)}</b></div><div><small>Выигрыш</small><b>{cfmt(winPay)}</b></div><div><small>Итог сессии</small><b className={stat.net > 0 ? 'pos' : stat.net < 0 ? 'neg' : ''}>{stat.net > 0 ? '+' : ''}{cfmt(stat.net)}</b></div></div>
+      <StakeInput value={stake} onChange={setStake} balance={ctx.save.balance} disabled={busy} />
+      <button className="cta" disabled={busy} onClick={roll}>{busy ? 'Выпадает число…' : `Бросить · ${cfmt(stake)}`}</button>
+      <p className="m small center">Число от 0 до 99, все числа равновероятны. Чем меньше шанс, тем выше коэффициент. Побед {stat.w}, поражений {stat.l}.</p>
     </div>
   )
 }
 
 // ---------- ОРЁЛ И РЕШКА ----------
 type Side = 'heads' | 'tails'
-const COIN_RTP = 0.95
+const COIN_RTP = 0.86
 const SIDE_NAME: Record<Side, string> = { heads: 'Орёл', tails: 'Решка' }
 function CoinFace({ side }: { side: Side }) {
   // общий чекан: рант, жемчужный поясок, внутренний валик
@@ -1275,7 +1494,7 @@ export function Coinflip({ ctx }: { ctx: Ctx }) {
     let bet = pot
     if (pot === 0) { if (!ctx.charge(stake, 'Орёл и решка — ставка')) return; bet = stake; ctx.bump('coin') }
     play.click()
-    const pWin = chanceNow() * (1 - ctx.tilt())
+    const pWin = chanceNow()
     const win = rnd() < pWin
     const other: Side = pick === 'heads' ? 'tails' : 'heads'
     let out: Side[] = Array.from({ length: count }, () => (win ? pick : (rnd() < 0.5 ? pick : other)))
@@ -1287,8 +1506,8 @@ export function Coinflip({ ctx }: { ctx: Ctx }) {
       setFlipping(false); setLand(win ? 'won' : 'lost')
       if (win) {
         const np = Math.floor(bet * mult)
-        setPot(np); setStreak(s => s + 1); play.coin()
-        setRes({ ok: true, text: `Угадал! Выигрыш серии ${money(np)} ⭐` })
+        setPot(np); setStreak(s => s + 1); play.ding(streak + 1)
+        setRes({ ok: true, text: `Угадал! Выигрыш серии ${cfmt(np)}` })
       } else {
         setPot(0); setStreak(0); play.lose()
         setRes({ ok: false, text: `Не повезло: ${out.map(f => SIDE_NAME[f]).join(', ')}. Ставка сгорела` })
@@ -1298,7 +1517,7 @@ export function Coinflip({ ctx }: { ctx: Ctx }) {
   const cash = () => {
     if (!inSeries) return
     ctx.pay(pot, 'Орёл и решка — выигрыш'); play.big()
-    setRes({ ok: true, text: `Забрал ${money(pot)} ⭐ · серия из ${streak}` }); setPot(0); setStreak(0)
+    setRes({ ok: true, text: `Забрал ${cfmt(pot)} · серия из ${streak}` }); setPot(0); setStreak(0)
   }
   const setCnt = (v: number) => { setCount(v); setFaces(Array.from({ length: v }, (_, i) => faces[i] ?? 'heads')); setRot(Array.from({ length: v }, (_, i) => rot[i] ?? 0)); play.click() }
   const locked = flipping || inSeries
@@ -1321,7 +1540,7 @@ export function Coinflip({ ctx }: { ctx: Ctx }) {
         ))}
         {!flipping && streak > 0 && <Burst key={`w${streak}`} type="gold" n={40} />}
       </div>
-      {streak > 0 && <div className="streak">Серия: <b>{streak}</b> · в банке <b className="gold">{money(pot)} ⭐</b></div>}
+      {streak > 0 && <div className="streak">Серия: <b>{streak}</b> · в банке <b className="gold">{cfmt(pot)}</b></div>}
       {pot === 0 && <StakeInput value={stake} onChange={setStake} balance={ctx.save.balance} disabled={locked} />}
       <div className="optrow"><span className="m small">Сторона</span>
         {(['heads', 'tails'] as Side[]).map(sd => <button key={sd} className={pick === sd ? 'on' : ''} disabled={flipping} onClick={() => { setPick(sd); play.click() }}>{sd === 'heads' ? '🦅 Орёл' : '★ Решка'}</button>)}
@@ -1334,8 +1553,8 @@ export function Coinflip({ ctx }: { ctx: Ctx }) {
       </p>
       {res && <Result good={res.ok}>{res.text}</Result>}
       {inSeries
-        ? <div className="two"><button className="cta ghost" onClick={cash}>Забрать {money(pot)}</button><button className="cta" onClick={flip}>Дальше · ×{mult.toFixed(2).replace('.', ',')}</button></div>
-        : <button className="cta" disabled={flipping || ctx.save.balance < 1} onClick={flip}>{flipping ? 'Летит…' : `Подбросить · ${money(stake)}`}</button>}
+        ? <div className="two"><button className="cta ghost" onClick={cash}>Забрать {cfmt(pot)}</button><button className="cta" onClick={flip}>Дальше · ×{mult.toFixed(2).replace('.', ',')}</button></div>
+        : <button className="cta" disabled={flipping || ctx.save.balance < 1} onClick={flip}>{flipping ? 'Летит…' : `Подбросить · ${cfmt(stake)}`}</button>}
       <p className="m small center">После выигрыша можно забрать банк или рискнуть им снова с новым множителем: серия идёт без новой ставки.</p>
     </div>
   )

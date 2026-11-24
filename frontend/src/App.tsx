@@ -1,6 +1,6 @@
 import { sfx, play } from './sfx'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowDownLeft, ArrowUpRight, ChevronLeft, Gamepad2, Gift, ListChecks, Package, Plus, UserRound, Volume2, VolumeX, X } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, ChevronLeft, Gamepad2, Gift, ListChecks, Package, Plus, Trophy, UserRound, Volume2, VolumeX, X } from 'lucide-react'
 import { Coin, GiftArt, TonIcon, UsdtIcon } from './art'
 import { ACHIEVEMENTS, DAILY_XP, TASK_XP, betXp, levelInfo, rankOf } from './levels'
 import { DEMO, SAVE_KEY } from './lib'
@@ -9,16 +9,18 @@ import { DepositModal, liveRates, ownerDemoUnlocked, useLocalDeposits } from './
 import { GAME_INFO } from './menuart'
 import {
 
-  Blackjack, Cases, Coinflip, Crash, Mansion, Mines, Plinko, Race, Slots, Storm, Upgrade, type Ctx,
+  Blackjack, Cases, Coinflip, Crash, HiLo, Mansion, Mines, Plinko, Race, Slots, Storm, Upgrade, type Ctx,
 } from './games'
+import { Dice, Wheel, WheelMenu, Scratch, Tower } from './games2'
+import { Keno, Roulette } from './games3'
 import {
-  CASE, CASES, GAME_TITLE, caseOddsOf, FLAGS, houseTilt, GIFTS, GIFT_ORDER, COINS_PER_TON, SELL_RATE, STARS_TO_COINS, dateNow, defaultSave, defsFromImport, defsFromNft, loadSave, mergeCatalog, mergeNft, money, persist, setCatalog, todayKey, uid, walkPrices,
+  CASE, CASES, DISP, cfmt, CASE_CATS, pctText, GAME_TITLE, caseOddsOf, FLAGS, houseTilt, GIFTS, GIFT_ORDER, COINS_PER_TON, SELL_RATE, STARS_TO_COINS, dateNow, defaultSave, defsFromImport, defsFromNft, loadSave, mergeCatalog, mergeNft, money, persist, setCatalog, todayKey, uid, walkPrices,
   type ImportedGift, type NftCollection,
   type Gift as GiftT, type GiftKind, type Save, type Tx,
 } from './lib'
 
 type Tab = 'Игры' | 'Кейсы' | 'Подарки' | 'Задания' | 'Профиль'
-type GameId = 'upgrade' | 'storm' | 'rocket' | 'slots' | 'cases' | 'mansion' | 'coin' | 'mines' | 'blackjack' | 'plinko' | 'racing' | 'launch'
+type GameId = 'upgrade' | 'storm' | 'rocket' | 'slots' | 'cases' | 'mansion' | 'coin' | 'mines' | 'blackjack' | 'plinko' | 'racing' | 'hilo' | 'dice' | 'wheel' | 'scratch' | 'tower' | 'keno' | 'roulette'
 type GameDef = { id: GameId; name: string; image: string; players: string; tag?: string; desc: string; soon?: boolean }
 
 const tabs: { label: Tab; icon: typeof Gamepad2 }[] = [
@@ -28,7 +30,7 @@ const tabs: { label: Tab; icon: typeof Gamepad2 }[] = [
 const games: GameDef[] = [
   { id: 'upgrade', name: 'Апгрейд', image: 'upgrade', players: '1 240', tag: 'HOT', desc: 'Несколько подарков в один редкий' },
   { id: 'storm', name: 'Шторм', image: 'storm', players: '3 410', tag: 'X500', desc: 'Слот 5×3, девять линий' },
-  { id: 'rocket', name: 'Ракета', image: 'rocket', players: '2 080', tag: 'LIVE', desc: 'Забери множитель до вылета' },
+  { id: 'rocket', name: 'Ракета', image: 'launch', players: '2 080', tag: 'LIVE', desc: 'Забери множитель до вылета' },
   { id: 'cases', name: 'Кейсы', image: 'cases', players: '117', tag: 'NEW', desc: 'Открой до 10 кейсов за раз' },
   { id: 'slots', name: 'Быстрые слоты', image: 'cases', players: '284', desc: 'Три барабана, один спин' },
   { id: 'mines', name: 'Мины', image: 'mines', players: '29', desc: 'Открывай клетки, избегай мин' },
@@ -36,8 +38,14 @@ const games: GameDef[] = [
   { id: 'blackjack', name: 'Блэкджек', image: 'cases', players: '10', desc: 'Набери 21 очко' },
   { id: 'mansion', name: 'Особняк', image: 'mansion', players: '27', tag: 'NEW', desc: 'Поднимайся по этажам, обходи призраков' },
   { id: 'coin', name: 'Орёл и решка', image: 'upgrade', players: '58', tag: 'NEW', desc: 'Серия побед и множитель ×1,9' },
+  { id: 'hilo', name: 'Больше / Меньше', image: 'mines', players: '96', tag: 'NEW', desc: 'Угадай: число больше или меньше' },
+  { id: 'dice', name: 'Кости', image: 'dice', players: '73', tag: 'NEW', desc: 'Один кубик или сумма двух, шанс на выбор' },
+  { id: 'wheel', name: 'Колесо удачи', image: 'wheel', players: '131', tag: 'NEW', desc: 'Колёса с подарками и NFT' },
+  { id: 'scratch', name: 'Скретч-карты', image: 'scratch', players: '64', tag: 'NEW', desc: 'Сотри слой и найди три одинаковых' },
+  { id: 'tower', name: 'Башня', image: 'tower', players: '52', tag: 'NEW', desc: 'Поднимайся по этажам, обходи ловушки' },
+  { id: 'keno', name: 'Кено', image: 'keno', players: '48', tag: 'NEW', desc: 'Выбери до 10 чисел из 40' },
+  { id: 'roulette', name: 'Рулетка', image: 'roulette', players: '89', tag: 'NEW', desc: 'Числа, цвета и дюжины' },
   { id: 'racing', name: 'Гонки', image: 'racing', players: '42', tag: 'NEW', desc: 'Ставь на машину: победитель или топ-3' },
-  { id: 'launch', name: 'Запуск', image: 'launch', players: '63', desc: 'Скоро', soon: true },
 ]
 const TITLES: Record<string, string> = Object.fromEntries(games.map(g => [g.id, g.name]))
 
@@ -60,6 +68,8 @@ export default function App() {
   const [sound, setSound] = useState(() => localStorage.getItem('qcup-sound') === '1')
   const [confetti, setConfetti] = useState(0)
   const [depositOpen, setDepositOpen] = useState(false)
+  const [caseCat, setCaseCat] = useState('Все')
+  const [caseMode, setCaseMode] = useState<'cases' | 'wheels'>('cases')
   const [demoOk, setDemoOk] = useState(false) // демо-режим владельца (адрес игры + #demo)
   useEffect(() => { ownerDemoUnlocked().then(setDemoOk) }, [])
   // если сохранение изменили в другой вкладке (например, demo.html), подхватываем без перезагрузки
@@ -79,6 +89,7 @@ export default function App() {
     return () => clearInterval(t)
   }, [])
   const pickCur = (c: 'STAR' | 'TON' | 'USDT') => { setCur(c); setCurMenu(false); try { localStorage.setItem('qcup-cur', c) } catch { /* хранилище недоступно */ } }
+  DISP.cur = cur; DISP.ton = rates?.ton || 0; DISP.usdt = rates?.usdt || 0 // игры и тексты показывают суммы в выбранной валюте
   const fmtBal = (stars: number) => cur === 'TON' && rates ? `${(stars / rates.ton).toFixed(3)} TON` : cur === 'USDT' && rates ? `${(stars / rates.usdt).toFixed(2)} USDT` : money(stars)
 
   const commit = useCallback((f: (s: Save) => Save) => {
@@ -183,7 +194,7 @@ export default function App() {
   // Пополнения без бэкенда (GitHub Pages): сайт сам находит платёж в блокчейне и добавляет монеты
   useLocalDeposits(useCallback((coins: number, asset: string) => {
     commit(s => ({ ...s, balance: s.balance + coins, tx: [{ id: uid(), title: `Пополнение ${asset}`, amount: coins, date: dateNow() }, ...s.tx].slice(0, 60) }))
-    setNotice(`Пополнение: +${money(coins)} ⭐`)
+    setNotice(`Пополнение: +${cfmt(coins)}`)
   }, [commit]))
 
   // Пополнения: зачисленные на сервере монеты один раз попадают в баланс игр
@@ -207,7 +218,7 @@ export default function App() {
         const coins = Number((await c.json()).coins)
         if (coins > 0) {
           commit(s => ({ ...s, balance: s.balance + coins, tx: [{ id: uid(), title: 'Пополнение', amount: coins, date: dateNow() }, ...s.tx].slice(0, 60) }))
-          setNotice(`Пополнение: +${money(coins)} ⭐`)
+          setNotice(`Пополнение: +${cfmt(coins)}`)
         }
       } catch { /* повторим на следующем тике */ } finally { busy = false }
     }
@@ -249,7 +260,7 @@ export default function App() {
       pay: (amount, title) => {
         if (!(amount > 0)) return
         commit(s => ({ ...s, balance: s.balance + amount, tx: [tx(title, amount), ...s.tx].slice(0, 60), stats: { ...s.stats, gPaid: (s.stats.gPaid || 0) + (GAME_TITLE.test(title) ? amount : 0) } }))
-        setConfetti(c => c + 1); setNotice(`${title}: +${money(amount)}`); beep(880, 220)
+        setConfetti(c => c + 1); setNotice(`${title}: +${cfmt(amount)}`); beep(880, 220)
       },
       addGift: (kind, title) => {
         const gift: GiftT = { uid: uid(), kind, num: S.current.nextNum }
@@ -259,7 +270,7 @@ export default function App() {
       },
       removeGift: id => commit(s => ({ ...s, gifts: s.gifts.filter(g => g.uid !== id) })),
       tally: (staked, paid) => commit(s => ({ ...s, stats: { ...s.stats, gStaked: (s.stats.gStaked || 0) + staked, gPaid: (s.stats.gPaid || 0) + paid } })),
-      tilt: () => houseTilt(S.current.stats),
+      tilt: () => 0, // подкрутки под игрока больше нет: везде честные шансы, преимущество казино заложено в таблицы выплат
       bump: key => commit(s => ({ ...s, stats: { ...s.stats, [key]: (s.stats[key] || 0) + 1 } })),
     }
   }, [save, commit, beep])
@@ -326,6 +337,13 @@ export default function App() {
       case 'mansion': return <Mansion ctx={ctx} />
       case 'coin': return <Coinflip ctx={ctx} />
       case 'racing': return <Race ctx={ctx} />
+      case 'hilo': return <HiLo ctx={ctx} />
+      case 'dice': return <Dice ctx={ctx} />
+      case 'wheel': return <Wheel ctx={ctx} seed={seed} />
+      case 'scratch': return <Scratch ctx={ctx} />
+      case 'tower': return <Tower ctx={ctx} />
+      case 'keno': return <Keno ctx={ctx} />
+      case 'roulette': return <Roulette ctx={ctx} />
       default: return <p className="m center">Режим появится позже.</p>
     }
   }
@@ -385,17 +403,30 @@ export default function App() {
       </>}
 
       {tab === 'Кейсы' && <section className="page-section">
-        <h1>Кейсы</h1><p className="muted">Из кейса выпадает подарок. Его можно оставить, продать или улучшить.</p>
-        <div className="case-list">
-          {CASES.map(c => (
-            <button key={c.id} className="case-card" style={{ ['--cc' as string]: c.color }} onClick={() => openGame('cases', c.id)}>
-              <CaseIcon pool={c.pool} />
-              <b>{c.name}</b>
-              <span className="muted">от {money(GIFTS[c.pool[0]]?.base || 0)} до {money(GIFTS[c.pool[c.pool.length - 1]]?.base || 0)}</span>
-              <span className="case-price">{money(c.price)} ⭐</span>
-            </button>
-          ))}
+        <h1>{caseMode === 'cases' ? 'Кейсы' : 'Колёса удачи'}</h1>
+        <div className="seg-switch" role="tablist">
+          <button role="tab" aria-selected={caseMode === 'cases'} className={caseMode === 'cases' ? 'on' : ''} onClick={() => setCaseMode('cases')}>Кейсы</button>
+          <button role="tab" aria-selected={caseMode === 'wheels'} className={caseMode === 'wheels' ? 'on' : ''} onClick={() => setCaseMode('wheels')}>Колёса удачи</button>
         </div>
+        {caseMode === 'wheels' && <><p className="muted">Крути колесо с подарками или NFT. В секторах видно, что можно выиграть, и у каждого сектора равный шанс.</p><WheelMenu plain onPick={id => openGame('wheel', id)} /></>}
+        {caseMode === 'cases' && <p className="muted">Из кейса выпадает подарок. Его можно оставить, продать или улучшить. В каждом кейсе есть шанс на главный приз.</p>}
+        {caseMode === 'cases' && <div className="case-cats" role="tablist">
+          {['Все', ...CASE_CATS.filter(cat => CASES.some(c => c.cat === cat))].map(cat => <button key={cat} role="tab" aria-selected={caseCat === cat} className={caseCat === cat ? 'on' : ''} onClick={() => setCaseCat(cat)}>{cat}<small>{cat === 'Все' ? CASES.length : CASES.filter(c => c.cat === cat).length}</small></button>)}
+        </div>}
+        {caseMode === 'cases' && CASE_CATS.filter(cat => (caseCat === 'Все' || caseCat === cat) && CASES.some(c => c.cat === cat)).map(cat => <div key={cat} className="case-group">
+          {caseCat === 'Все' && <h3 className="case-cat">{cat}</h3>}
+          <div className="case-list">
+            {CASES.filter(c => c.cat === cat).sort((x, y) => x.price - y.price).map(c => (
+              <button key={c.id} className="case-card" style={{ ['--cc' as string]: c.color }} onClick={() => openGame('cases', c.id)}>
+                {c.tag && <em className="case-tag">{c.tag}</em>}
+                <CaseIcon pool={c.pool} />
+                <b>{c.name}</b>
+                <span className="case-prize"><Trophy size={11} />{GIFTS[c.jp]?.name} · {pctText(c.jpChance)}</span>
+                <span className="case-price">{cfmt(c.price)}</span>
+              </button>
+            ))}
+          </div>
+        </div>)}
       </section>}
 
       {tab === 'Подарки' && <GiftsTab save={save} ctx={ctx} onBuy={buy} onSell={sell} onUpgrade={uid => openGame('upgrade', uid)} />}
@@ -450,8 +481,6 @@ export default function App() {
             <button className="danger" onClick={() => { commit(s => ({ ...s, balance: 0 })); setNotice('Баланс обнулён') }}>Обнулить</button>
           </div>
         </div>}
-        <h2 className="section-title">Правила игры</h2>
-        <p className="fine-print">Во всех играх отдача игроку ниже 100%: казино всегда в плюсе, как и в настоящих. В Plinko, Апгрейде, Кейсах, Особняке и Гонках шансы всегда ровно такие, как показаны на экране. В остальных играх, если игрок долго выигрывает больше обычного, шансы понемногу ухудшаются.</p>
         <button className="outline-btn" onClick={reset}>Сбросить прогресс</button>
       </section>}
 
@@ -489,12 +518,12 @@ function GiftsTab({ save, ctx, onBuy, onSell, onUpgrade }: { save: Save; ctx: Ct
     <h1>Подарки</h1>
     <div className="subtabs"><button className={sub === 'mine' ? 'on' : ''} onClick={() => setSub('mine')}>Мои</button><button className={sub === 'market' ? 'on' : ''} onClick={() => setSub('market')}>Маркет</button></div>
     {sub === 'mine' ? <>
-      <div className="gift-sum"><span>{save.gifts.length} подарков</span><span>оценка {money(worth)}</span></div>
+      <div className="gift-sum"><span>{save.gifts.length} подарков</span><span>оценка {cfmt(worth)}</span></div>
       {!save.gifts.length && <div className="empty-history">Пока пусто. Загляни на маркет или открой кейс.</div>}
       {save.gifts.map(g => <div className="gift-row" key={g.uid}>
         <GiftArt kind={g.kind} size={48} />
         <div><b>{GIFTS[g.kind]?.name} #{g.num}</b><small>{GIFTS[g.kind].rarity}</small></div>
-        <div className="gift-act"><strong>{money(save.prices[g.kind])}</strong>
+        <div className="gift-act"><strong>{cfmt(save.prices[g.kind])}</strong>
           <span><button onClick={() => onUpgrade(g.uid)}>Апгрейд</button><button onClick={() => onSell(g)}>Продать</button></span></div>
       </div>)}
     </> : <>
@@ -507,7 +536,7 @@ function GiftsTab({ save, ctx, onBuy, onSell, onUpgrade }: { save: Save; ctx: Ct
         return <div className="gift-row" key={k}>
           <GiftArt kind={k} size={48} />
           <div><b>{GIFTS[k]?.name}</b><small>{GIFTS[k].rarity}</small></div>
-          <div className="gift-act"><strong>{money(p)}</strong>{GIFTS[k].nft && <small>≈ {(p / COINS_PER_TON).toFixed(p / COINS_PER_TON < 10 ? 2 : 1).replace('.', ',')} TON</small>}<span className={d >= 0 ? 'up' : 'down'}>{d >= 0 ? '+' : '−'}{Math.abs(d).toFixed(1).replace('.', ',')}% за день</span>
+          <div className="gift-act"><strong>{cfmt(p)}</strong>{GIFTS[k].nft && <small>≈ {(p / COINS_PER_TON).toFixed(p / COINS_PER_TON < 10 ? 2 : 1).replace('.', ',')} TON</small>}<span className={d >= 0 ? 'up' : 'down'}>{d >= 0 ? '+' : '−'}{Math.abs(d).toFixed(1).replace('.', ',')}% за день</span>
             <span><button disabled={save.balance < p} onClick={() => onBuy(k)}>Купить</button></span></div>
         </div>
       })}
@@ -526,7 +555,7 @@ function TransactionList({ items }: { items: Tx[] }) {
   return <div className="tx-list">{items.map(tx => <div className="tx-row" key={tx.id}>
     <span className={tx.amount >= 0 ? 'tx-icon plus' : 'tx-icon'}>{tx.amount >= 0 ? <ArrowDownLeft size={16} /> : <ArrowUpRight size={16} />}</span>
     <div><b>{tx.title}</b><small>{tx.date}</small></div>
-    <strong className={tx.amount > 0 ? 'positive' : ''}>{tx.amount === 0 ? 'подарок' : `${tx.amount > 0 ? '+' : ''}${money(tx.amount)}`}</strong>
+    <strong className={tx.amount > 0 ? 'positive' : ''}>{tx.amount === 0 ? 'подарок' : `${tx.amount > 0 ? '+' : ''}${cfmt(tx.amount)}`}</strong>
   </div>)}</div>
 }
 
