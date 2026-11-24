@@ -21,5 +21,6 @@
   "toncenterKey": "d3801390201346b0c3499c73658a7fbfb5e96f620e5aeab674cf33277e134cde",
   "tronKey": "",
   "starUsd": 0.015,
-  "apiUrl": "https://qcup-pay.tolstyjklim.workers.dev"
+  "apiUrl": "https://qcup-pay.tolstyjklim.workers.dev",
+  "demoHash": "v2:c15fea5e0283ec3f6fe34acb4830118bfdbd8867a0aebe9e4bca2c8c00919ce1"
 }
