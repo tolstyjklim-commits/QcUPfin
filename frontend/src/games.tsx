@@ -5,9 +5,9 @@ import { Burst, CrashScene } from './fx'
 import { Bulbs, SlotDefs, SlotSym } from './slotart'
 import { play } from './sfx'
 import {
-  CASES, caseOddsOf, GIFTS, GIFT_ORDER, MINES_COUNT, MINES_TOTAL, PAYLINES, PLINKO_RISK, SELL_RATE, type PlinkoRisk, SLOT3_PAY,
-  STORM_PAY, SYMBOLS, caseChance, crashPoint, minesMult, money, pickSymbol, rint, rnd, upgradeChance, weighted,
-  type Gift, type GiftKind, type Save,
+  CASES, caseOddsOf, GIFTS, GIFT_ORDER, MINES_COUNT, MINES_TOTAL, PAYLINES, PLINKO_RISK, RACERS, SELL_RATE, type PlinkoRisk, SLOT3_PAY,
+  STORM_PAY, SYMBOLS, caseChance, crashPoint, minesMult, money, pickSymbol, raceOdds, raceSimulate, RACE_LAPS, RACE_LEN, RACE_PROBS, LAP_LEN, rint, rnd, upgradeChance, weighted,
+  type Gift, type GiftKind, type RaceEvent, type RaceSim, type Save,
 } from './lib'
 
 export type Ctx = {
@@ -142,11 +142,12 @@ export function Crash({ ctx }: { ctx: Ctx }) {
   )
 }
 
-// ---------- АПГРЕЙД ПОДАРКОВ ----------
+// ---------- АПГРЕЙД ПОДАРКОВ (можно отдать сразу несколько) ----------
+const MAX_UPG = 12
 export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
   const gifts = ctx.save.gifts
   const prices = ctx.save.prices
-  const [sel, setSel] = useState<string | null>(seed && gifts.some(g => g.uid === seed) ? seed : null)
+  const [sel, setSel] = useState<string[]>(() => (seed && gifts.some(g => g.uid === seed) ? [seed] : []))
   const [picker, setPicker] = useState(false)
   const [tpicker, setTpicker] = useState(false)
   const [ptab, setPtab] = useState<'mine' | 'market'>('mine')
@@ -156,13 +157,14 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
   const [res, setRes] = useState<{ ok: boolean; text: string } | null>(null)
   const [fx, setFx] = useState<'win' | 'burn' | null>(null)
   const needle = useRef<SVGGElement>(null)
-  const cur = gifts.find(g => g.uid === sel) ?? null
-  const curPrice = cur ? prices[cur.kind] : 0
+  const chosen = useMemo(() => sel.map(id => gifts.find(g => g.uid === id)).filter((g): g is Gift => !!g), [sel, gifts])
+  const curPrice = chosen.reduce((a, g) => a + (prices[g.kind] || 0), 0) // цена всех выбранных подарков вместе
+  const has = chosen.length > 0
 
-  // все подарки дороже текущего (в том числе с очень малым шансом, например обычный → редкий NFT)
+  // все подарки дороже суммы выбранных (в том числе с очень малым шансом, например обычный → редкий NFT)
   const allTargets = useMemo(() =>
-    cur ? GIFT_ORDER.filter(k => prices[k] > curPrice * 1.05) : [],
-    [cur, curPrice, prices])
+    has ? GIFT_ORDER.filter(k => prices[k] > curPrice * 1.05) : [],
+    [has, curPrice, prices])
   // быстрые кнопки: ближайшие цели с заметным шансом
   const targets = useMemo(() => allTargets.filter(k => upgradeChance(curPrice, prices[k]) >= 0.02).slice(0, 16), [allTargets, curPrice, prices])
   useEffect(() => {
@@ -187,31 +189,32 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
     return () => cancelAnimationFrame(raf)
   }, [spinning])
 
-  const chance = cur && target ? upgradeChance(curPrice, prices[target]) : 0
-  const mult = cur && target ? prices[target] / curPrice : 0
+  const chance = has && target ? upgradeChance(curPrice, prices[target]) : 0
+  const mult = has && target ? prices[target] / curPrice : 0
   const R = 78, C = 2 * Math.PI * R
+  const toggle = (id: string) => { setSel(s => (s.includes(id) ? s.filter(i => i !== id) : s.length >= MAX_UPG ? s : [...s, id])); setRes(null); setFx(null); play.click() }
 
   const go = () => {
-    if (!cur || !target || spinning) return
-    const ok = rnd() < chance * (1 - ctx.tilt())
+    if (!has || !target || spinning) return
+    const ok = rnd() < chance // шанс ровно тот, что показан на циферблате
     ctx.tally(curPrice, ok ? prices[target] : 0)
     const zone = chance * 360
     const angle = ok ? zone * (0.06 + rnd() * 0.88) : zone + (360 - zone) * (0.06 + rnd() * 0.88)
     const next = rot - (rot % 360) + 360 * 5 + angle
-    const gift = cur, tgt = target
+    const give = chosen, tgt = target
     setSpinning(true); setRes(null); setFx(null); setRot(next); play.whoosh()
     window.setTimeout(() => {
-      ctx.removeGift(gift.uid)
+      give.forEach(g => ctx.removeGift(g.uid))
       ctx.bump('upgrades')
       if (ok) {
         const g = ctx.addGift(tgt, 'Апгрейд — успех')
         ctx.notify(`Апгрейд удался: ${GIFTS[tgt]?.name} #${g.num}`)
         setRes({ ok: true, text: `Получено: ${GIFTS[tgt]?.name} #${g.num}` })
-        setSel(g.uid); setFx('win'); play.big()
+        setSel([g.uid]); setFx('win'); play.big()
       } else {
-        ctx.notify('Не повезло, подарок сгорел')
-        setRes({ ok: false, text: `${GIFTS[gift.kind]?.name} #${gift.num} сгорел` })
-        setSel(null); setFx('burn'); play.lose(); play.boom()
+        ctx.notify(give.length > 1 ? 'Не повезло, подарки сгорели' : 'Не повезло, подарок сгорел')
+        setRes({ ok: false, text: give.length > 1 ? `${give.length} подарков сгорели (${money(curPrice)} ⭐)` : `${GIFTS[give[0].kind]?.name} #${give[0].num} сгорел` })
+        setSel([]); setFx('burn'); play.lose(); play.boom()
       }
       setSpinning(false)
     }, 4200)
@@ -219,29 +222,38 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
 
   const buyPick = (k: GiftKind) => {
     const p = prices[k]
-    if (!ctx.charge(p, `Маркет — ${GIFTS[k]?.name}`, false)) return
+    if (sel.length >= MAX_UPG || !ctx.charge(p, `Маркет — ${GIFTS[k]?.name}`, false)) return
     const ng = ctx.addGift(k, `Маркет — ${GIFTS[k]?.name}`)
-    setSel(ng.uid); setPicker(false); setRes(null); setFx(null); play.click()
+    setSel(s => [...s, ng.uid]); setRes(null); setFx(null); play.click()
   }
   const market = GIFT_ORDER.filter(k => !GIFTS[k]?.nft).concat(GIFT_ORDER.filter(k => GIFTS[k]?.nft).slice(0, 12))
   const ticks = Array.from({ length: 60 }, (_, i) => i)
+  const first = chosen[0]
   return (
     <div className="upg">
       <div className="upg-pair">
         <div className={`upg-slot ${fx === 'burn' ? 'burn' : ''}`}>
-          <span className="m small">Отдаёшь</span>
-          {cur
-            ? <button className="slot-btn" disabled={spinning} onClick={() => setPicker(true)}><GiftArt kind={cur.kind} size={88} /><b>{GIFTS[cur.kind]?.name} #{cur.num}</b><span className="gold">{money(curPrice)} ⭐</span></button>
-            : <button className="slot-plus" disabled={spinning} onClick={() => { setPtab(gifts.length ? 'mine' : 'market'); setPicker(true) }} aria-label="Выбрать подарок"><span>+</span><b className="m small">{fx === 'burn' ? 'Сгорел. Выбери новый' : 'Выбрать подарок'}</b></button>}
+          <span className="m small">Отдаёшь{chosen.length > 1 ? ` · ${chosen.length}` : ''}</span>
+          {has
+            ? <button className="slot-btn" disabled={spinning} onClick={() => { setPtab('mine'); setPicker(true) }}>
+              {chosen.length === 1
+                ? <GiftArt kind={first.kind} size={88} />
+                : <div className="upg-stack">{chosen.slice(0, 4).map((g, i) => <span key={g.uid} style={{ ['--i' as string]: i }}><GiftArt kind={g.kind} size={52} glow={false} /></span>)}{chosen.length > 4 && <em>+{chosen.length - 4}</em>}</div>}
+              <b>{chosen.length === 1 ? `${GIFTS[first.kind]?.name} #${first.num}` : `${chosen.length} подарков`}</b>
+              <span className="gold">{money(curPrice)} ⭐</span>
+            </button>
+            : <button className="slot-plus" disabled={spinning} onClick={() => { setPtab(gifts.length ? 'mine' : 'market'); setPicker(true) }} aria-label="Выбрать подарок"><span>+</span><b className="m small">{fx === 'burn' ? 'Сгорели. Выбери новые' : 'Выбрать подарки'}</b></button>}
           {fx === 'burn' && <Burst key="b" type="ember" n={60} />}
         </div>
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#a5bbb1" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 12h16M14 6l6 6-6 6" /></svg>
         <div className={`upg-slot ${fx === 'win' ? 'glow' : ''} ${spinning ? 'pending' : ''}`}>
           <span className="m small">Получаешь</span>
-          {target ? <><GiftArt kind={target} size={88} animate={fx === 'win'} /><b>{GIFTS[target]?.name}</b><span className="gold">≈ {money(prices[target])} ⭐</span></> : <b className="m">{cur ? 'Выше нет' : '—'}</b>}
+          {target ? <><GiftArt kind={target} size={88} animate={fx === 'win'} /><b>{GIFTS[target]?.name}</b><span className="gold">≈ {money(prices[target])} ⭐</span></> : <b className="m">{has ? 'Выше нет' : '—'}</b>}
           {fx === 'win' && <Burst key="w" type="gold" n={90} />}
         </div>
       </div>
+
+      {has && gifts.length > chosen.length && !spinning && chosen.length < MAX_UPG && <button className="upg-add" onClick={() => { setPtab('mine'); setPicker(true) }}>+ Добавить ещё подарки: шанс растёт вместе с суммой</button>}
 
       <div className="upg-targets">
         {targets.map(k => (
@@ -250,7 +262,7 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
             <b>×{(prices[k] / curPrice).toFixed(1).replace('.', ',')}</b>
           </button>
         ))}
-        {cur && allTargets.length > 0 && <button disabled={spinning} className="more" onClick={() => { setTpicker(true); play.click() }}>Все цели · {allTargets.length}</button>}
+        {has && allTargets.length > 0 && <button disabled={spinning} className="more" onClick={() => { setTpicker(true); play.click() }}>Все цели · {allTargets.length}</button>}
       </div>
 
       <div className={`dial ${spinning ? 'spinning' : ''}`}>
@@ -274,12 +286,12 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
       </div>
 
       {res && <Result good={res.ok}>{res.text}</Result>}
-      <button className="cta" disabled={!cur || !target || spinning} onClick={go}>
-        {spinning ? <><RotateCcw size={18} className="spin-icon" /> Крутится…</> : 'Апгрейд'}
+      <button className="cta" disabled={!has || !target || spinning} onClick={go}>
+        {spinning ? <><RotateCcw size={18} className="spin-icon" /> Крутится…</> : chosen.length > 1 ? `Апгрейд · ${chosen.length} подарков` : 'Апгрейд'}
       </button>
-      <p className="m small center">Если не повезёт, подарок сгорит. Подарки существуют только внутри игры.</p>
+      <p className="m small center">Если не повезёт, все выбранные подарки сгорят. Подарки существуют только внутри игры.</p>
 
-      {tpicker && cur && (
+      {tpicker && has && (
         <div className="sheet-bg" onClick={() => setTpicker(false)}>
           <div className="sheet" onClick={e => e.stopPropagation()}>
             <div className="sheet-tabs"><button className="on">Во что улучшить · {allTargets.length}</button></div>
@@ -303,19 +315,25 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
               <button className={ptab === 'mine' ? 'on' : ''} onClick={() => setPtab('mine')}>Мои подарки · {gifts.length}</button>
               <button className={ptab === 'market' ? 'on' : ''} onClick={() => setPtab('market')}>Маркет</button>
             </div>
+            <p className="m small center">Выбрано: {chosen.length} из {MAX_UPG}{has ? ` · ${money(curPrice)} ⭐` : ''}. Можно отдать несколько подарков сразу.</p>
             <div className="sheet-list">
               {ptab === 'mine' && (gifts.length
                 ? gifts.map(x => (
-                  <button key={x.uid} className={x.uid === sel ? 'on' : ''} onClick={() => { setSel(x.uid); setPicker(false); setRes(null); setFx(null); play.click() }}>
+                  <button key={x.uid} className={sel.includes(x.uid) ? 'on' : ''} onClick={() => toggle(x.uid)}>
                     <GiftArt kind={x.kind} size={44} glow={false} /><span><b>{GIFTS[x.kind]?.name} #{x.num}</b><i>{money(prices[x.kind])} ⭐</i></span>
+                    <em className="chk">{sel.includes(x.uid) ? '✓' : ''}</em>
                   </button>))
                 : <p className="m small center">Подарков пока нет. Купи на маркете.</p>)}
               {ptab === 'market' && market.map(k => (
-                <button key={k} disabled={ctx.save.balance < prices[k]} onClick={() => buyPick(k)}>
+                <button key={k} disabled={ctx.save.balance < prices[k] || sel.length >= MAX_UPG} onClick={() => buyPick(k)}>
                   <GiftArt kind={k} size={44} glow={false} /><span><b>{GIFTS[k]?.name}</b><i>Купить за {money(prices[k])}</i></span>
                 </button>))}
             </div>
-            <button className="sheet-close" onClick={() => setPicker(false)}>Закрыть</button>
+            <div className="two">
+              <button className="sheet-close" onClick={() => setSel(gifts.slice(0, MAX_UPG).map(g => g.uid))}>Выбрать все</button>
+              <button className="sheet-close" onClick={() => setSel([])}>Сбросить</button>
+            </div>
+            <button className="sheet-close done" onClick={() => setPicker(false)}>Готово{has ? ` · ${chosen.length}` : ''}</button>
           </div>
         </div>
       )}
@@ -449,8 +467,9 @@ export function Slots({ ctx }: { ctx: Ctx }) {
   )
 }
 
-// ---------- КЕЙС (лента-рулетка) ----------
+// ---------- КЕЙС (лента-рулетка, можно открыть сразу несколько) ----------
 const CELL = 100
+const QTYS = [1, 3, 5, 10]
 export function Cases({ ctx, caseId }: { ctx: Ctx; caseId?: string | null }) {
   const C = CASES.find(c => c.id === caseId) || CASES[0] || { id: '', name: '', color: '#fff', pool: [] as string[], weights: [] as number[], price: 0, ev: 0 }
   const [phase, setPhase] = useState<'idle' | 'shake' | 'roll' | 'done'>('idle')
@@ -459,6 +478,9 @@ export function Cases({ ctx, caseId }: { ctx: Ctx; caseId?: string | null }) {
   const [anim, setAnim] = useState(false)
   const [win, setWin] = useState(36)
   const [got, setGot] = useState<Gift | null>(null)
+  const [qty, setQty] = useState(1)               // сколько кейсов открыть за раз
+  const [multi, setMulti] = useState<Gift[] | null>(null)
+  const [spent, setSpent] = useState(0)
   const [fast, setFast] = useState(false) // быстрое открытие без рулетки
   const view = useRef<HTMLDivElement>(null)
   const track = useRef<HTMLDivElement>(null)
@@ -480,11 +502,26 @@ export function Cases({ ctx, caseId }: { ctx: Ctx; caseId?: string | null }) {
   const alive = useRef(true)
   useEffect(() => () => { alive.current = false }, [])
   const open = () => {
-    if ((phase === 'shake' || phase === 'roll') || !C.pool.length || !ctx.charge(C.price, 'Кейс — открытие')) return
-    ctx.bump('cases')
-    const t = ctx.tilt()
-    const kind = weighted(C.pool, t ? C.weights.map((w, i) => w * Math.pow(1 / (GIFTS[C.pool[i]]?.base || 1), t * 0.8)) : C.weights)
-    ctx.tally(0, ctx.save.prices[kind] || 0)
+    if ((phase === 'shake' || phase === 'roll') || !C.pool.length || !ctx.charge(C.price * qty, qty > 1 ? `Кейс — открытие ×${qty}` : 'Кейс — открытие')) return
+    for (let i = 0; i < qty; i++) ctx.bump('cases')
+    setMulti(null); setSpent(C.price * qty)
+    const prices = ctx.save.prices
+
+    if (qty > 1) { // несколько кейсов сразу: все подарки выпадают разом, без рулетки
+      const kinds = Array.from({ length: qty }, () => weighted(C.pool, C.weights))
+      ctx.tally(0, kinds.reduce((a, k) => a + (prices[k] || 0), 0))
+      setGot(null); setPhase('shake'); play.whoosh()
+      const ready = Promise.race([Promise.all([...new Set(kinds)].map(k => preloadGift(k, false))), new Promise(r => timers.current.push(window.setTimeout(r, 1500)))])
+      const minWait = new Promise(r => timers.current.push(window.setTimeout(r, 900)))
+      Promise.all([ready, minWait]).then(() => {
+        if (!alive.current) { kinds.forEach(k => ctx.addGift(k, 'Кейс — подарок')); return } // вышли из экрана: подарки всё равно выдаём
+        setMulti(kinds.map(k => ctx.addGift(k, 'Кейс — подарок'))); setPhase('done'); play.big()
+      })
+      return
+    }
+
+    const kind = weighted(C.pool, C.weights) // шансы ровно те, что показаны в списке «Что внутри»
+    ctx.tally(0, prices[kind] || 0)
     if (fast) { setGot(ctx.addGift(kind, 'Кейс — подарок')); setPhase('done'); play.big(); return }
 
     // Новая лента продолжает старую: видимые сейчас подарки остаются на тех же местах, поэтому ничего не пропадает и не мигает
@@ -501,10 +538,10 @@ export function Cases({ ctx, caseId }: { ctx: Ctx; caseId?: string | null }) {
     const ready = Promise.race([Promise.all([...new Set(s)].map(k => preloadGift(k, k === kind))), new Promise(r => timers.current.push(window.setTimeout(r, 1500)))])
     const minWait = new Promise(r => timers.current.push(window.setTimeout(r, 700)))
     Promise.all([ready, minWait]).then(() => {
-      if (!alive.current) return
+      if (!alive.current) { ctx.addGift(kind, 'Кейс — подарок'); return }
       setAnim(false); setStrip(s); setX(off); setWin(WIN)
       requestAnimationFrame(() => requestAnimationFrame(() => {
-        if (!alive.current) return
+        if (!alive.current) { ctx.addGift(kind, 'Кейс — подарок'); return }
         const vw = view.current?.clientWidth || 340
         const final = -(WIN * CELL + CELL / 2 - vw / 2 + (rnd() - 0.5) * (CELL * 0.6))
         setPhase('roll'); setAnim(true); setX(final)
@@ -515,25 +552,45 @@ export function Cases({ ctx, caseId }: { ctx: Ctx; caseId?: string | null }) {
     })
   }
   const busy = phase === 'shake' || phase === 'roll'
+  const multiWorth = multi ? multi.reduce((a, g) => a + (ctx.save.prices[g.kind] || 0), 0) : 0
+  const multiSell = multi ? multi.reduce((a, g) => a + Math.floor((ctx.save.prices[g.kind] || 0) * SELL_RATE), 0) : 0
   return (
     <div className="cases">
-      <div className={`roll-view ${phase}`} ref={view}>
-        <div className="roll-marker" />
-        <div ref={track} className="roll-track" style={{ transform: `translateX(${x}px)`, transition: anim ? 'transform 5.2s cubic-bezier(.08,.6,.06,1)' : 'none' }}>
-          {strip.map((k, i) => (
-            <div key={i} className={`roll-cell ${phase === 'done' && i === win ? 'won' : ''}`} style={{ width: CELL }}>
-              <GiftArt kind={k} size={76} animate={phase === 'done' && i === win} />
+      {multi
+        ? <div className="multi-grid" style={{ ['--cc' as string]: C.color }}>
+          {multi.map((g, i) => {
+            const pr = ctx.save.prices[g.kind] || 0
+            return <div key={g.uid} className={`multi-item ${pr > C.price ? 'up' : ''}`} style={{ animationDelay: `${i * 0.08}s` }}>
+              <GiftArt kind={g.kind} size={56} />
+              <b>{GIFTS[g.kind]?.name}</b>
+              <span className="gold">{money(pr)}</span>
             </div>
-          ))}
+          })}
+          <Burst key={multi[0]?.uid} type="confetti" n={90} />
         </div>
-        {phase === 'done' && <Burst key="d" type="confetti" n={90} />}
+        : <div className={`roll-view ${phase}`} ref={view}>
+          <div className="roll-marker" />
+          <div ref={track} className="roll-track" style={{ transform: `translateX(${x}px)`, transition: anim ? 'transform 5.2s cubic-bezier(.08,.6,.06,1)' : 'none' }}>
+            {strip.map((k, i) => (
+              <div key={i} className={`roll-cell ${phase === 'done' && i === win ? 'won' : ''}`} style={{ width: CELL }}>
+                <GiftArt kind={k} size={76} animate={phase === 'done' && i === win} />
+              </div>
+            ))}
+          </div>
+          {phase === 'done' && <Burst key="d" type="confetti" n={90} />}
+        </div>}
+      {multi
+        ? <Result good={multiWorth >= spent}>Выпало {multi.length} · ≈{money(multiWorth)} ⭐ (потрачено {money(spent)})</Result>
+        : got
+          ? <Result good>Выпало: {GIFTS[got.kind]?.name} #{got.num} · ≈{money(ctx.save.prices[got.kind])} ⭐</Result>
+          : <p className="m small center">Внутри один из {C.pool.length} подарков. Чаще всего {GIFTS[C.pool[0]]?.name} ({caseOddsOf(C, 0).toFixed(0)}%), реже всего {GIFTS[C.pool[C.pool.length - 1]]?.name} ({caseOddsOf(C, C.pool.length - 1).toFixed(2).replace('.', ',')}%).</p>}
+      <div className="optrow"><span className="m small">Открыть сразу</span>
+        {QTYS.map(v => <button key={v} className={qty === v ? 'on' : ''} disabled={busy} onClick={() => { setQty(v); play.click() }}>×{v}</button>)}
       </div>
-      {got
-        ? <Result good>Выпало: {GIFTS[got.kind]?.name} #{got.num} · ≈{money(ctx.save.prices[got.kind])} ⭐</Result>
-        : <p className="m small center">Внутри один из {C.pool.length} подарков. Чаще всего {GIFTS[C.pool[0]]?.name} ({caseOddsOf(C, 0).toFixed(0)}%), реже всего {GIFTS[C.pool[C.pool.length - 1]]?.name} ({caseOddsOf(C, C.pool.length - 1).toFixed(2).replace('.', ',')}%).</p>}
-      <label className="fastopt"><input type="checkbox" checked={fast} disabled={busy} onChange={e => setFast(e.target.checked)} /> Быстрое открытие</label>
+      {qty === 1 && <label className="fastopt"><input type="checkbox" checked={fast} disabled={busy} onChange={e => setFast(e.target.checked)} /> Быстрое открытие</label>}
+      {multi && !busy && <button className="cta ghost" onClick={() => { ctx.pay(multiSell, `Продажа — кейсы ×${multi.length}`); multi.forEach(g => ctx.removeGift(g.uid)); setMulti(null); setPhase('idle'); play.coin() }}>Продать все за {money(multiSell)}</button>}
       {got && !busy && <button className="cta ghost" onClick={() => { const v = Math.floor(ctx.save.prices[got.kind] * SELL_RATE); ctx.removeGift(got.uid); ctx.pay(v, `Продажа — ${GIFTS[got.kind]?.name}`); setGot(null); setPhase('idle'); play.coin() }}>Продать за {money(Math.floor(ctx.save.prices[got.kind] * SELL_RATE))}</button>}
-      <button className="cta" disabled={busy} onClick={open}>{busy ? 'Открываем…' : `Открыть · ${C.price}`}</button>
+      <button className="cta" disabled={busy || ctx.save.balance < C.price * qty} onClick={open}>{busy ? 'Открываем…' : `Открыть${qty > 1 ? ` ×${qty}` : ''} · ${money(C.price * qty)}`}</button>
       <h3 className="sub-title">Что внутри · {C.name}</h3>
       <div className="case-items">
         {C.pool.map((k, i) => ({ k, i })).sort((a, b) => GIFTS[b.k].base - GIFTS[a.k].base).map(({ k, i }) => (
@@ -608,6 +665,9 @@ export function Mines({ ctx }: { ctx: Ctx }) {
 }
 
 // ---------- PLINKO (отскоки по колышкам) ----------
+// Исход выбирается до броска: на каждом колышке шар уходит влево или вправо с шансом 50/50, поэтому ячейки выпадают
+// ровно с теми вероятностями, на которых посчитаны множители. Анимация не «симулирует» физику заново, а проигрывает
+// готовую траекторию из параболических прыжков от колышка к колышку: шар не может застрять или зависнуть.
 export function Plinko({ ctx }: { ctx: Ctx }) {
   const ROWS = 8, W = 300, SX = 30, SY = 25, TOP = 28
   const [stake, setStake] = useState(50)
@@ -618,128 +678,140 @@ export function Plinko({ ctx }: { ctx: Ctx }) {
   const [risk, setRisk] = useState<PlinkoRisk>('mid')
   const MULTS = PLINKO_RISK[risk]
   const raf = useRef(0)
-  useEffect(() => () => cancelAnimationFrame(raf.current), [])
+  const pending = useRef<{ w: number } | null>(null) // выигрыш бросающегося шара: выдаём, даже если игрок ушёл с экрана
+  const ctxRef = useRef(ctx); ctxRef.current = ctx
+  useEffect(() => () => {
+    cancelAnimationFrame(raf.current)
+    const p = pending.current
+    if (p) { pending.current = null; if (p.w > 0) ctxRef.current.pay(p.w, 'Plinko — выигрыш') }
+  }, [])
   const pegX = (r: number, c: number) => W / 2 + (c - (r + 1) / 2) * SX   // ряд r содержит r+2 колышка
   const pegY = (r: number) => TOP + r * SY
   const drop = () => {
     if (busy || !ctx.charge(stake, 'Plinko — ставка')) return
     ctx.bump('plinko'); play.whoosh()
     setBusy(true); setLanded(null); setHot(null)
-    const t = ctx.tilt()
-    const steps: (0 | 1)[] = []
-    for (let r = 0, k = 0; r < ROWS; r++) {
-      // при серии выигрышей шар чаще тянет к центру, где множители ниже
-      const toCentre: 0 | 1 = k < r / 2 ? 1 : 0
-      const s = (rnd() < t * 0.5 ? toCentre : rnd() < 0.5 ? 0 : 1) as 0 | 1
-      steps.push(s); k += s
-    }
-    const slot = steps.reduce<number>((a, b) => a + b, 0) // исход выбран заранее, физика его только «разыгрывает»
+
+    // ---- исход ----
+    const steps: number[] = Array.from({ length: ROWS }, () => (rnd() < 0.5 ? 0 : 1))
     const kk: number[] = []
-    for (let r = 0, k = 0; r < ROWS; r++) { k += steps[r]; kk.push(k) } // колышек ряда r, на который должен попасть шар
+    for (let r = 0, k = 0; r < ROWS; r++) { k += steps[r]; kk.push(k) } // номер колышка в ряду r, по которому ударит шар
+    const slot = kk[ROWS - 1]
+    const mult = MULTS[slot]
+    const win = Math.floor(stake * mult)
+    pending.current = { w: win }
 
-    // ---- физика: гравитация, упругие столкновения с колышками, стенки и пол ----
-    const G = 640, R = 5.6, RP = 3.2, E = 0.52, H = 1 / 240
-    const BW = W / (ROWS + 1), WALL_TOP = 216 // перегородки между ячейками: шар не может перелететь в соседнюю
-    const FLOOR = pegY(ROWS - 1) + 59 // пол внутри ячеек с множителями: шар «проваливается» в ячейку
-    const binX = W / 2 + (slot - ROWS / 2) * (W / (ROWS + 1))
-    const pegs: { x: number; y: number; r: number; c: number }[] = []
-    for (let r = 0; r < ROWS; r++) for (let c = 0; c < r + 2; c++) pegs.push({ x: pegX(r, c), y: pegY(r), r, c })
-    let x = pegX(0, kk[0]) + (rnd() - 0.5) * 3, y = 4, vx = (rnd() - 0.5) * 6, vy = 0
-    let row = 0, elapsed = 0, floorAt = -1, hotAt = -1, tickAt = -1
-    let maxY = y, progAt = 0 // защита от зависания: если шар долго не опускается, подталкиваем его к цели
+    // ---- траектория ----
+    const G = 640, R = 5.6, RP = 3.2, M = R + RP, OFF = 3.2
+    const BW = W / (ROWS + 1), WALL_TOP = 216
+    const FLOOR = pegY(ROWS - 1) + 59 // дно ячейки с множителем
+    const binX = W / 2 + (slot - ROWS / 2) * BW
+    // в какую сторону шар уходит с колышка ряда r (последний колышек отправляет его к центру своей ячейки)
+    const dir = (r: number) => {
+      if (r + 1 < ROWS) return steps[r + 1] ? 1 : -1
+      const d = binX - pegX(r, kk[r])
+      return Math.abs(d) > 1.5 ? Math.sign(d) : rnd() < 0.5 ? 1 : -1
+    }
+    // шар всегда падает чуть сбоку от вершины колышка (так он и должен отскакивать, а не балансировать на нём)
+    const contact = (r: number) => {
+      const off = OFF + (rnd() - 0.5) * 1.2
+      return { x: pegX(r, kk[r]) + dir(r) * off, y: pegY(r) - Math.sqrt(M * M - off * off) }
+    }
+    type Seg = { t0: number; dur: number; x0: number; y0: number; vx: number; vy: number; peg?: string; ease?: boolean }
+    const segs: Seg[] = []
+    const hop = (t0: number, from: { x: number; y: number }, to: { x: number; y: number }, vy0: number, peg?: string): Seg => {
+      const dur = (-vy0 + Math.sqrt(vy0 * vy0 + 2 * G * (to.y - from.y))) / G
+      return { t0, dur, x0: from.x, y0: from.y, vx: (to.x - from.x) / dur, vy: vy0, peg }
+    }
+    const first = contact(0)
+    const start = { x: first.x, y: -6 }
+    segs.push({ t0: 0, dur: Math.sqrt((2 * (first.y - start.y)) / G), x0: start.x, y0: start.y, vx: 0, vy: 0, peg: `0-${kk[0]}` })
+    let t = segs[0].dur, prev = first
+    for (let r = 1; r < ROWS; r++) {
+      const c = contact(r)
+      const sg = hop(t, prev, c, -(62 + rnd() * 14), `${r}-${kk[r]}`)
+      segs.push(sg); t += sg.dur; prev = c
+    }
+    const land = { x: binX + (rnd() - 0.5) * 8, y: FLOOR - R }
+    const fin = hop(t, prev, land, -(62 + rnd() * 14))
+    fin.ease = true // последний прыжок: шар быстро выходит на середину своей ячейки, до перегородок
+    segs.push(fin); t += fin.dur
+    const landAt = t
+    const B1 = 0.3, B2 = 0.2, END = landAt + B1 + B2 + 0.45 // два затухающих подскока на дне и пауза
+    const lo = slot * BW + R + 1.5, hi = (slot + 1) * BW - R - 1.5
+    const place = (el: number) => {
+      let x: number, y: number
+      if (el >= landAt) {
+        const e = el - landAt
+        x = land.x
+        y = land.y
+        if (e < B1) y -= 13 * 4 * (e / B1) * (1 - e / B1)
+        else if (e < B1 + B2) { const u = (e - B1) / B2; y -= 5 * 4 * u * (1 - u) }
+      } else {
+        const sg = segs.find(s => el < s.t0 + s.dur) || segs[segs.length - 1]
+        const u = Math.min(el - sg.t0, sg.dur)
+        const k = sg.ease ? 1 - Math.pow(1 - u / sg.dur, 3) : 0
+        x = sg.ease ? sg.x0 + (land.x - sg.x0) * k : sg.x0 + sg.vx * u
+        y = sg.y0 + sg.vy * u + 0.5 * G * u * u
+      }
+      if (y + R > WALL_TOP) x = Math.max(lo, Math.min(hi, x)) // перегородки между ячейками
+      return { x, y }
+    }
+
     const trail: { x: number; y: number }[] = []
-
-    // после удара подбираем горизонтальную скорость так, чтобы по параболе долететь до колышка следующего ряда (или до своей ячейки)
-    const aim = (fromRow: number) => {
-      const last = fromRow + 1 >= ROWS
-      const tx = last ? binX + (rnd() - 0.5) * 8 : pegX(fromRow + 1, kk[fromRow + 1]) + (rnd() - 0.5) * 5
-      const ty = last ? FLOOR - R : pegY(fromRow + 1) - (R + RP) - 0.5
-      const disc = vy * vy + 2 * G * (ty - y)
-      const tt = disc > 0 ? (-vy + Math.sqrt(disc)) / G : 0.2
-      vx = (tx - x) / Math.max(tt, 0.08)
-    }
-    const unstick = () => {
-      const stuckFor = elapsed - progAt
-      if (stuckFor < 0.3 || floorAt >= 0) return
-      const nr = Math.min(row + 1, ROWS - 1)
-      const tx = row + 1 >= ROWS ? binX : pegX(nr, kk[nr])
-      if (stuckFor > 0.9) { // крайняя мера: переносим шар в просвет над целевым колышком
-        x = tx; y = Math.max(y, row + 1 >= ROWS ? y : pegY(nr) - 16); vx = 0; vy = 90; progAt = elapsed; return
-      }
-      vx = Math.sign(tx - x || 1) * Math.max(70, Math.min(160, Math.abs(tx - x) * 6)); vy = Math.max(vy, 40)
-      progAt = elapsed - 0.3 + 0.12 // повторим толчок через ~0.18 с, если не помогло
-    }
-    const step = () => {
-      vy += G * H; x += vx * H; y += vy * H
-      if (y > maxY + 1.5) { maxY = y; progAt = elapsed }
-      else unstick()
-      if (x < R) { x = R; vx = Math.abs(vx) * 0.5 }
-      if (x > W - R) { x = W - R; vx = -Math.abs(vx) * 0.5 }
-      for (const p of pegs) {
-        if (Math.abs(p.y - y) > R + RP) continue
-        const dx = x - p.x, dy = y - p.y, d = Math.hypot(dx, dy), m = R + RP
-        if (d >= m || d === 0) continue
-        const nx = dx / d, ny = dy / d
-        x = p.x + nx * m; y = p.y + ny * m          // вытолкнуть из колышка
-        const vn = vx * nx + vy * ny
-        if (vn < 0) {
-          vx -= (1 + E) * vn * nx; vy -= (1 + E) * vn * ny // отскок с потерей энергии
-          vx *= 0.96
-          if (vy > -45) vy = -45                           // шар не «прилипает» к колышку
-          aim(p.r); row = p.r
-          hotAt = elapsed
-          setHot(`${p.r}-${p.c}`)
-          if (elapsed - tickAt > 0.05) { tickAt = elapsed; play.tick() }
-        }
-      }
-      if (y + R > WALL_TOP) {
-        const lo = slot * BW + R + 1.5, hi = (slot + 1) * BW - R - 1.5
-        if (x < lo) { x = lo; vx = Math.abs(vx) * 0.3 } else if (x > hi) { x = hi; vx = -Math.abs(vx) * 0.3 }
-      }
-      if (y >= FLOOR - R) {
-        y = FLOOR - R
-        if (vy > 0) { vy = -vy * 0.38; vx *= 0.8 }
-        if (floorAt < 0) floorAt = elapsed
-      }
-    }
-    let prev = performance.now(), acc = 0, over = false
+    let hit = 0, hotAt = -1
+    const t0 = performance.now()
     const f = (now: number) => {
-      if (over) return
-      acc += Math.min(0.05, (now - prev) / 1000); prev = now
-      while (acc >= H) { step(); elapsed += H; acc -= H }
-      trail.push({ x, y }); if (trail.length > 7) trail.shift()
-      if (hotAt >= 0 && elapsed - hotAt > 0.12) { hotAt = -1; setHot(null) }
-      setBall({ x, y, s: row, trail: [...trail] })
-      if ((floorAt >= 0 && elapsed - floorAt > 0.4) || elapsed > 7) { // приземлился (или страховка по времени)
-        over = true
+      const el = (now - t0) / 1000
+      // удары по колышкам: подсветка и тик
+      while (hit < segs.length && segs[hit].peg && el >= segs[hit].t0 + segs[hit].dur) { setHot(segs[hit].peg!); hotAt = el; play.tick(); hit++ }
+      if (hit < segs.length && !segs[hit].peg) hit = segs.length
+      if (hotAt >= 0 && el - hotAt > 0.12) { hotAt = -1; setHot(null) }
+      const p = place(Math.min(el, END))
+      trail.push(p); if (trail.length > 7) trail.shift()
+      setBall({ x: p.x, y: p.y, s: hit, trail: [...trail] })
+      if (el >= END) {
+        pending.current = null
         setBall(null); setHot(null); setLanded(slot); setBusy(false)
-        const w = Math.floor(stake * MULTS[slot])
-        if (w > 0) { ctx.pay(w, 'Plinko — выигрыш'); if (MULTS[slot] >= 3) play.big() }
+        if (win > 0) { ctx.pay(win, 'Plinko — выигрыш'); if (mult >= 3) play.big() }
         return
       }
       raf.current = requestAnimationFrame(f)
     }
     raf.current = requestAnimationFrame(f)
   }
+  const bw = W / (ROWS + 1)
   return (
     <div className="plinko">
       <svg viewBox="0 0 300 275" className="pboard" role="img" aria-label="Поле Plinko с множителями">
-        {Array.from({ length: ROWS }, (_, r) => Array.from({ length: r + 2 }, (_, c) =>
-          <circle key={`${r}-${c}`} cx={pegX(r, c)} cy={pegY(r)} r={hot === `${r}-${c}` ? 4.6 : 3.2} fill={hot === `${r}-${c}` ? '#FFE08A' : '#8fb3a2'} />))}
-        {Array.from({ length: ROWS + 2 }, (_, i) => <rect key={`w${i}`} x={i * (W / (ROWS + 1)) - 1.2} y={216} width={2.4} height={52} rx={1.2} fill="#7fb59d" opacity={0.85} />)}
+        <defs>
+          <radialGradient id="pb" cx=".35" cy=".3"><stop offset="0" stopColor="#fff6d0" /><stop offset="1" stopColor="#f0a21b" /></radialGradient>
+          <linearGradient id="pbg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#1d2b36" /><stop offset="1" stopColor="#2b4a43" /></linearGradient>
+          <radialGradient id="ppeg" cx=".35" cy=".3"><stop offset="0" stopColor="#ffffff" /><stop offset="1" stopColor="#8fb3a2" /></radialGradient>
+          <filter id="pglow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="2.2" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+        </defs>
+        <rect x="0" y="0" width="300" height="275" rx="18" fill="url(#pbg)" />
+        {Array.from({ length: 14 }, (_, i) => <circle key={`s${i}`} cx={(i * 47 + 13) % 296 + 2} cy={(i * 29 + 7) % 190 + 4} r={0.8} fill="#dff7ec" opacity={0.25 + (i % 3) * 0.12} />)}
+        {Array.from({ length: ROWS }, (_, r) => Array.from({ length: r + 2 }, (_, c) => {
+          const on = hot === `${r}-${c}`
+          return <g key={`${r}-${c}`}>
+            {on && <circle cx={pegX(r, c)} cy={pegY(r)} r={9} fill="#FFE08A" opacity={0.35} />}
+            <circle cx={pegX(r, c)} cy={pegY(r)} r={on ? 4.6 : 3.2} fill={on ? '#FFE08A' : 'url(#ppeg)'} filter={on ? 'url(#pglow)' : undefined} />
+          </g>
+        }))}
+        {Array.from({ length: ROWS + 2 }, (_, i) => <rect key={`w${i}`} x={i * bw - 1.2} y={216} width={2.4} height={52} rx={1.2} fill="#7fb59d" opacity={0.85} />)}
         {MULTS.map((m, i) => {
-          const cx = W / 2 + (i - ROWS / 2) * (W / (ROWS + 1)), w = W / (ROWS + 1) - 5, on = landed === i || (!!ball && ball.y > 222 && Math.floor(ball.x / (W / (ROWS + 1))) === i)
+          const cx = W / 2 + (i - ROWS / 2) * bw, w = bw - 5, on = landed === i || (!!ball && ball.y > 222 && Math.floor(ball.x / bw) === i)
           const hi = m >= 3, lo = m < 1
-          return <g key={`b${i}`} transform={on ? `translate(0 -3)` : undefined}>
+          return <g key={`b${i}`} transform={on ? 'translate(0 -3)' : undefined}>
             <rect x={cx - w / 2} y={238} width={w} height={28} rx={6} fill={on ? '#ffd166' : hi ? '#5b3d12' : lo ? '#4a2436' : '#2f5646'} stroke={on ? '#fff3c4' : hi ? '#b8892e' : lo ? '#7a3b57' : '#4f8a73'} strokeWidth={on ? 1.6 : 1} />
             <text x={cx} y={256} textAnchor="middle" fontSize={m >= 10 ? 10 : 11.5} fontWeight={800} fill={on ? '#1a1304' : hi ? '#ffc24b' : lo ? '#ff9db8' : '#d6efe2'}>{m}×</text>
           </g>
         })}
         {ball && <>
           {ball.trail.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={2 + i * 0.5} fill="#FFC24B" opacity={0.04 + i * 0.03} />)}
-          <circle cx={ball.x} cy={ball.y} r="8.5" fill="#FFC24B" opacity=".22" /><circle cx={ball.x} cy={ball.y} r="5.6" fill="url(#pb)" />
+          <circle cx={ball.x} cy={ball.y} r="9" fill="#FFC24B" opacity=".22" /><circle cx={ball.x} cy={ball.y} r="5.6" fill="url(#pb)" />
         </>}
-        <defs><radialGradient id="pb" cx=".35" cy=".3"><stop offset="0" stopColor="#fff6d0" /><stop offset="1" stopColor="#f0a21b" /></radialGradient></defs>
       </svg>
       {landed !== null && <Result good={MULTS[landed] >= 1}>×{MULTS[landed]} · {MULTS[landed] >= 1 ? '+' : ''}{money(Math.floor(stake * MULTS[landed]))}</Result>}
       <div className="optrow"><span className="m small">Риск</span>
@@ -747,6 +819,7 @@ export function Plinko({ ctx }: { ctx: Ctx }) {
       </div>
       <StakeInput value={stake} onChange={setStake} balance={ctx.save.balance} disabled={busy} />
       <button className="cta" disabled={busy} onClick={drop}>{busy ? 'Шар падает…' : `Бросить · ${money(stake)}`}</button>
+      <p className="m small center">На каждом колышке шар уходит влево или вправо с шансом 50/50. Отдача игроку ниже 100%: у казино всегда небольшой плюс.</p>
     </div>
   )
 }
@@ -830,56 +903,290 @@ export function Blackjack({ ctx }: { ctx: Ctx }) {
   )
 }
 
-// ---------- ОСОБНЯК ----------
-const HOUSE_RTP = 0.95
+// ---------- ОСОБНЯК (этажи с призраками) ----------
+// На каждом этаже n дверей, за одной из них призрак. Прошёл этаж: множитель растёт. Можно забрать выигрыш на любом этаже.
+// Шанс пройти этаж (n-1)/n, множитель после k этажей = 90% · (n/(n-1))^k, поэтому отдача при любой стратегии ровно 90%.
+const HOUSE_RTP = 0.9
+const floorsFor = (n: number) => (n === 2 ? 5 : n === 3 ? 6 : 7) // с двумя дверями множители растут быстрее, поэтому этажей меньше: максимум около ×29
+
+function MansionRoof({ glow, scared }: { glow: boolean; scared: boolean }) {
+  return (
+    <svg className={`mn-roof ${glow ? 'glow' : ''} ${scared ? 'scared' : ''}`} viewBox="0 0 340 120" aria-hidden="true">
+      <defs>
+        <linearGradient id="mnSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#141a33" /><stop offset="1" stopColor="#3b3560" /></linearGradient>
+        <radialGradient id="mnMoon" cx=".4" cy=".4"><stop offset="0" stopColor="#fffbe6" /><stop offset="1" stopColor="#e9d9a0" /></radialGradient>
+        <linearGradient id="mnTile" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#5b3a63" /><stop offset="1" stopColor="#2d1d3a" /></linearGradient>
+        <radialGradient id="mnLamp" cx=".5" cy=".5"><stop offset="0" stopColor="#ffe08a" /><stop offset="1" stopColor="#ffe08a" stopOpacity="0" /></radialGradient>
+      </defs>
+      <rect width="340" height="120" fill="url(#mnSky)" />
+      {Array.from({ length: 22 }, (_, i) => <circle key={i} cx={(i * 61 + 11) % 336 + 2} cy={(i * 37 + 5) % 70 + 3} r={0.7 + (i % 3) * 0.3} fill="#fff" opacity={0.35 + (i % 4) * 0.15} />)}
+      <circle cx="280" cy="30" r="40" fill="#fff6c8" opacity=".08" />
+      <circle cx="280" cy="30" r="17" fill="url(#mnMoon)" />
+      <circle cx="274" cy="26" r="3.2" fill="#d8c98a" opacity=".6" /><circle cx="286" cy="35" r="2.4" fill="#d8c98a" opacity=".6" />
+      <g className="mn-bats">
+        <path className="bat b1" d="M60 36c4-6 8-3 10 0c2-3 6-6 10 0c-4-2-6 0-10 4c-4-4-6-6-10-4z" fill="#0b0d18" />
+        <path className="bat b2" d="M120 22c3-5 6-2 8 0c2-2 5-5 8 0c-3-1-5 0-8 3c-3-3-5-4-8-3z" fill="#0b0d18" />
+        <path className="bat b3" d="M214 48c3-5 6-2 8 0c2-2 5-5 8 0c-3-1-5 0-8 3c-3-3-5-4-8-3z" fill="#0b0d18" />
+      </g>
+      <rect x="236" y="48" width="16" height="40" fill="#241631" /><rect x="233" y="44" width="22" height="7" fill="#37224a" />
+      <g className="mn-smoke"><circle cx="244" cy="36" r="4" /><circle cx="247" cy="28" r="5" /><circle cx="243" cy="19" r="6" /></g>
+      <path d="M20 112L170 26L320 112Z" fill="url(#mnTile)" stroke="#6e4b7d" strokeWidth="2" strokeLinejoin="round" />
+      <path d="M44 106L170 36L296 106" fill="none" stroke="#7d5890" strokeWidth="1" opacity=".5" />
+      <rect x="158" y="14" width="24" height="3" rx="1.5" fill="#6e4b7d" /><path d="M170 14v-9M163 9h14" stroke="#9a78ad" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="170" cy="76" r="17" fill="url(#mnLamp)" opacity={glow ? 1 : 0.55} className="mn-lamp" />
+      <circle cx="170" cy="76" r="11" fill="#1b1128" stroke="#9a78ad" strokeWidth="2" />
+      <path d="M170 65v22M159 76h22" stroke="#9a78ad" strokeWidth="1.5" />
+      <circle cx="170" cy="76" r="8" fill={glow ? '#ffd166' : '#ffe08a'} opacity={glow ? 0.95 : 0.3} />
+      {glow && <text x="170" y="80" fontSize="11" textAnchor="middle">💰</text>}
+      <rect x="0" y="108" width="340" height="12" fill="#2d1d3a" />
+    </svg>
+  )
+}
+
 export function Mansion({ ctx }: { ctx: Ctx }) {
   const [stake, setStake] = useState(50)
-  const [n, setN] = useState(3) // число дверей: за одной награда
-  const mult = HOUSE_RTP * n
-  const [prize, setPrize] = useState<number | null>(null)
-  const [picked, setPicked] = useState<number | null>(null)
+  const [n, setN] = useState(3) // дверей на этаже: за одной из них призрак
+  const FL = floorsFor(n)
+  const [phase, setPhase] = useState<'idle' | 'play' | 'win' | 'lose'>('idle')
+  const [floor, setFloor] = useState(0) // сколько этажей пройдено
+  const [marks, setMarks] = useState<{ pick: number; ghost: number }[]>([])
+  const [locked, setLocked] = useState(0) // ставка текущего раунда
   const [won, setWon] = useState(0)
-  const busy = picked !== null
-  const start = useCallback(() => { setPrize(null); setPicked(null); setWon(0) }, [])
-  const choose = (i: number) => {
-    if (busy) return
-    if (!ctx.charge(stake, 'Особняк — ставка')) return
+  const mult = (k: number) => (k > 0 ? HOUSE_RTP * Math.pow(n / (n - 1), k) : 0)
+  const fmt = (m: number) => m.toFixed(m >= 100 ? 0 : 2).replace('.', ',')
+  const playing = phase === 'play'
+
+  const start = () => {
+    if (playing || !ctx.charge(stake, 'Особняк — ставка')) return
     ctx.bump('mansion'); play.click()
-    let p = rint(n)
-    if (p === i && rnd() < ctx.tilt()) p = (i + 1 + rint(n - 1)) % n
-    const w = p === i ? Math.floor(stake * mult) : 0
-    setPrize(p); setPicked(i); setWon(w)
-    window.setTimeout(() => { if (w > 0) { ctx.pay(w, 'Особняк — находка'); play.big() } else { ctx.notify('За дверью пусто'); play.lose() } }, 600)
+    setLocked(stake); setFloor(0); setMarks([]); setWon(0); setPhase('play')
   }
-  const cols = n <= 4 ? n : 3
+  const finishWin = (k: number) => {
+    const w = Math.floor(locked * mult(k))
+    setWon(w); setPhase('win')
+    if (w > 0) { ctx.pay(w, 'Особняк — находка'); play.big() }
+  }
+  const choose = (d: number) => {
+    if (!playing) return
+    const ghost = rint(n) // призрак выбирает дверь случайно и поровну, шанс каждой двери 1/n
+    setMarks(m => [...m, { pick: d, ghost }])
+    if (d === ghost) { setPhase('lose'); play.boom(); play.lose(); ctx.notify('За дверью призрак! Ставка сгорела'); return }
+    const nf = floor + 1
+    setFloor(nf); play.coin()
+    if (nf === FL) finishWin(nf)
+  }
+  const cashOut = () => { if (playing && floor > 0) finishWin(floor) }
+
+  const rows = Array.from({ length: FL }, (_, i) => FL - 1 - i)
   return (
     <div className="mansion">
-      <StakeInput value={stake} onChange={setStake} balance={ctx.save.balance} disabled={busy} />
-      <div className="optrow"><span className="m small">Дверей</span>
-        {[2, 3, 4, 5, 6].map(v => <button key={v} className={n === v ? 'on' : ''} disabled={busy} onClick={() => { setN(v); play.click() }}>{v}</button>)}
-      </div>
-      <p className="m small center">Награда за одной из {n} дверей: <b className="gold">×{mult.toFixed(2).replace('.', ',')}</b> · выигрыш {money(Math.floor(stake * mult))} ⭐</p>
-      <div className="doors" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
-        {Array.from({ length: n }, (_, i) => {
-          const open = picked !== null
-          const cls = `door ${n > 4 ? 'sm' : ''} ${open ? 'open' : ''} ${open && i === prize ? 'win' : ''} ${open && i === picked && i !== prize ? 'lose' : ''}`
-          return (
-            <div key={i} role="button" tabIndex={open ? -1 : 0} aria-label={`Дверь ${i + 1}`} className={cls}
-              onClick={() => choose(i)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') choose(i) }}>
-              <div className="frame">
-                <div className="room"><span className="behind">{open ? (i === prize ? '💰' : '🕸️') : ''}</span></div>
-                <div className="leaf">
-                  <i className="pn p1" /><i className="pn p2" /><i className="pn p3" /><i className="pn p4" />
-                  <i className="knob" /><i className="plate">{i + 1}</i>
+      <div className={`mn-house ${phase}`}>
+        <MansionRoof glow={phase === 'win'} scared={phase === 'lose'} />
+        <div className="mn-body">
+          {rows.map(fl => {
+            const passed = fl < floor, now = playing && fl === floor, lostHere = phase === 'lose' && fl === floor
+            const mk = marks[fl]
+            const top = fl === FL - 1
+            return (
+              <div key={fl} className={`mn-floor ${passed ? 'passed' : ''} ${now ? 'now' : ''} ${lostHere ? 'lost' : ''} ${top ? 'top' : ''}`}>
+                <div className="mn-tag"><b>{top ? 'Чердак' : `${fl + 1} эт.`}</b><i>×{fmt(mult(fl + 1))}</i></div>
+                <div className="mn-doors" style={{ gridTemplateColumns: `repeat(${n}, 1fr)` }}>
+                  {Array.from({ length: n }, (_, d) => {
+                    const picked = !!mk && mk.pick === d
+                    const open = (passed || lostHere) && picked
+                    const ghostShown = (passed || lostHere) && !!mk && mk.ghost === d
+                    return (
+                      <button key={d} className={`mdoor ${open ? 'open' : ''} ${ghostShown ? 'ghost' : ''} ${lostHere && picked ? 'boo' : ''} ${now ? 'live' : ''}`}
+                        disabled={!now} onClick={() => choose(d)} aria-label={`Этаж ${fl + 1}, дверь ${d + 1}`}>
+                        <span className="mdoor-room">{ghostShown ? '👻' : open ? '✨' : ''}</span>
+                        <span className="mdoor-leaf"><i className="knob" /><i className="slit" /></span>
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
-              {open && i === prize && picked === prize && <Burst key="g" type="gold" n={60} />}
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
+        <div className="mn-ground" />
+        {phase === 'win' && <Burst key="mw" type="gold" n={100} />}
+        {phase === 'lose' && <Burst key="ml" type="ember" n={70} />}
       </div>
-      {picked === null && <p className="m small center">Выбери дверь: ставка спишется при открытии.</p>}
-      {picked !== null && <><Result good={picked === prize}>{picked === prize ? `Нашёл! +${money(won)} ⭐` : 'Пусто. Попробуй ещё раз'}</Result><button className="cta" onClick={start}>Ещё раз</button></>}
+
+      {phase === 'idle' && <p className="m small center">Призрак прячется за одной из {n} дверей на каждом этаже. Поднимайся вверх: чем выше, тем больше множитель.</p>}
+      {playing && <p className="m small center">Этаж {floor + 1} из {FL} · сейчас <b className="gold">×{fmt(mult(floor))}</b>{floor > 0 ? ` · можно забрать ${money(Math.floor(locked * mult(floor)))} ⭐` : ''}</p>}
+      {phase === 'win' && <Result good>{floor === FL ? 'Чердак покорён! ' : 'Забрал вовремя: '}+{money(won)} ⭐ · ×{fmt(mult(floor))}</Result>}
+      {phase === 'lose' && <Result>Призрак на {floor + 1}-м этаже. Ставка {money(locked)} ⭐ сгорела</Result>}
+
+      {!playing && <>
+        <StakeInput value={stake} onChange={setStake} balance={ctx.save.balance} />
+        <div className="optrow"><span className="m small">Дверей на этаже</span>
+          {[2, 3, 4].map(v => <button key={v} className={n === v ? 'on' : ''} onClick={() => { setN(v); play.click() }}>{v}</button>)}
+        </div>
+        <p className="m small center">Максимум ×{fmt(mult(FL))} · шанс пройти этаж {Math.round(((n - 1) / n) * 100)}% · отдача {Math.round(HOUSE_RTP * 100)}%</p>
+        <button className="cta" onClick={start}>{phase === 'idle' ? 'Войти в особняк' : 'Ещё раз'} · {money(stake)}</button>
+      </>}
+      {playing && <button className="cta green" disabled={floor === 0} onClick={cashOut}>{floor === 0 ? 'Пройди первый этаж' : `Забрать ${money(Math.floor(locked * mult(floor)))}`}</button>}
+    </div>
+  )
+}
+
+// ---------- ГОНКИ ----------
+// Настоящий заезд: 6 машин, 3 круга по овалу. Заезд целиком просчитывается движком raceSimulate (lib.ts) до старта,
+// экран лишь проигрывает готовую запись. У машин разные характеристики, в заезде работают слипстрим, нитро и ошибки в поворотах.
+// Коэффициент = 95% ÷ шанс (шансы получены прогоном того же движка), ставка на победителя или на топ-3.
+const TR = { cx1: 90, cx2: 230, cy: 110, r: 70 }
+const CORNER_LEN = Math.PI * TR.r
+function trackPos(d: number, lane: number): [number, number] {
+  const lp = ((d % LAP_LEN) + LAP_LEN) % LAP_LEN
+  const R = TR.r + (lane - 2.5) * 4.2
+  const { cx1, cx2, cy } = TR
+  if (lp < 70) return [160 + lp, cy + R]
+  if (lp < 70 + CORNER_LEN) { const th = Math.PI / 2 - (lp - 70) / TR.r; return [cx2 + R * Math.cos(th), cy + R * Math.sin(th)] }
+  if (lp < 210 + CORNER_LEN) return [cx2 - (lp - 70 - CORNER_LEN), cy - R]
+  if (lp < 210 + 2 * CORNER_LEN) { const th = -Math.PI / 2 - (lp - 210 - CORNER_LEN) / TR.r; return [cx1 + R * Math.cos(th), cy + R * Math.sin(th)] }
+  return [cx1 + (lp - 210 - 2 * CORNER_LEN), cy + R]
+}
+type RaceKind = 'win' | 'top3'
+const PLAY_SPEED = 2.1 // во сколько раз запись идёт быстрее реального времени симуляции
+const evText = (e: RaceEvent) => {
+  const n = RACERS[e.car].name
+  return e.kind === 'nitro' ? `${n} включает нитро` : e.kind === 'mistake' ? `${n} ошибся в повороте` : e.kind === 'lead' ? `${n} выходит вперёд`
+    : e.kind === 'lap' ? `Круг ${e.lap} из ${RACE_LAPS}` : `${n} финиширует ${e.place}-м`
+}
+export function Race({ ctx }: { ctx: Ctx }) {
+  const [stake, setStake] = useState(50)
+  const [kind, setKind] = useState<RaceKind>('win')
+  const [pick, setPick] = useState(0)
+  const [phase, setPhase] = useState<'bet' | 'count' | 'run' | 'done'>('bet')
+  const [count, setCount] = useState(0)
+  const [sim, setSim] = useState<RaceSim | null>(null)
+  const [st, setSt] = useState(0) // текущее время записи, с
+  const [res, setRes] = useState<{ ok: boolean; text: string } | null>(null)
+  const [hist, setHist] = useState<number[]>([])
+  const odds = RACERS.map((_, i) => raceOdds(kind === 'win' ? RACE_PROBS.win[i] : RACE_PROBS.top3[i]))
+  const raf = useRef(0)
+  const timers = useRef<number[]>([])
+  const pending = useRef<{ w: number } | null>(null) // выигрыш гонки, которая ещё идёт: выдаём, даже если игрок ушёл с экрана
+  const ctxRef = useRef(ctx); ctxRef.current = ctx
+  useEffect(() => () => {
+    cancelAnimationFrame(raf.current); timers.current.forEach(clearTimeout)
+    const p = pending.current
+    if (p) { pending.current = null; if (p.w > 0) ctxRef.current.pay(p.w, 'Гонки — выигрыш') }
+  }, [])
+
+  const busy = phase === 'count' || phase === 'run'
+  const go = () => {
+    if (busy || !ctx.charge(stake, `Гонки — ${kind === 'win' ? 'победитель' : 'топ-3'}`)) return
+    ctx.bump('race'); play.click()
+    // ---- заезд просчитан здесь целиком, дальше только показ ----
+    const s = raceSimulate()
+    const myPlace = s.order.indexOf(pick) + 1
+    const ok = kind === 'win' ? myPlace === 1 : myPlace <= 3
+    const o = odds[pick]
+    const w = ok ? Math.floor(stake * o) : 0
+    pending.current = { w }
+    setSim(s); setSt(0); setRes(null); setPhase('count')
+    const END = s.duration + 1
+    const run = () => {
+      setPhase('run'); play.whoosh()
+      const t0 = performance.now()
+      let nextEv = 0
+      const f = (now: number) => {
+        const t = Math.min(END, ((now - t0) / 1000) * PLAY_SPEED)
+        setSt(t)
+        while (nextEv < s.events.length && s.events[nextEv].t <= t) { if (s.events[nextEv].kind === 'finish') play.tick(); nextEv++ }
+        if (t >= END) {
+          pending.current = null
+          setPhase('done')
+          setHist(h => [s.order[0], ...h].slice(0, 8))
+          const win = RACERS[s.order[0]].name
+          if (w > 0) { ctx.pay(w, 'Гонки — выигрыш'); play.big(); setRes({ ok: true, text: `${RACERS[pick].name} — ${myPlace}-е место. Выигрыш +${money(w)} ⭐ (×${o.toFixed(2).replace('.', ',')})` }) }
+          else { play.lose(); setRes({ ok: false, text: `Победил ${win}. ${RACERS[pick].name} финишировал ${myPlace}-м. Ставка сгорела` }) }
+          return
+        }
+        raf.current = requestAnimationFrame(f)
+      }
+      raf.current = requestAnimationFrame(f)
+    }
+    const step = (k: number) => {
+      if (k === 0) { setCount(0); run(); return }
+      setCount(k); play.tick()
+      timers.current.push(window.setTimeout(() => step(k - 1), 800))
+    }
+    step(3)
+  }
+
+  // положение машин в текущий момент записи
+  const fi = sim ? Math.min(sim.frames.length - 1, st / sim.dt) : 0
+  const f0 = Math.floor(fi), fr = fi - f0
+  const dist = RACERS.map((_, i) => sim ? sim.frames[f0][i] + ((sim.frames[Math.min(f0 + 1, sim.frames.length - 1)][i]) - sim.frames[f0][i]) * fr : -i * 4)
+  const finished = RACERS.map((_, i) => (sim && sim.fin[i] >= 0 && st >= sim.fin[i]) ? sim.order.indexOf(i) + 1 : 0)
+  const board = RACERS.map((_, i) => i).sort((a, b) => (finished[a] && finished[b]) ? finished[a] - finished[b] : finished[a] ? -1 : finished[b] ? 1 : dist[b] - dist[a])
+  const lead = Math.max(...dist)
+  const lap = Math.min(RACE_LAPS, Math.max(1, Math.floor(Math.max(0, lead) / LAP_LEN) + 1))
+  const feed = sim ? sim.events.filter(e => e.t <= st).slice(-3).reverse() : []
+  const pct = (p: number) => `${(p * 100).toFixed(p < 0.1 ? 1 : 0).replace('.', ',')}%`
+  const bar = (v: number) => <i style={{ ['--w' as string]: `${v * 10}%` }} />
+  return (
+    <div className="race">
+      <div className="chips">{hist.length ? hist.map((h, i) => <span key={i} className="g" style={{ color: RACERS[h].color }}>{RACERS[h].name}</span>) : <span className="m small">Прошлые победители появятся здесь</span>}</div>
+      <div className={`race-board ${phase}`}>
+        <div className="race-hud"><span>Круг {phase === 'bet' ? 1 : lap} / {RACE_LAPS}</span><span className="m">{phase === 'run' || phase === 'done' ? `${st.toFixed(1).replace('.', ',')} с` : '3 круга · 6 машин'}</span></div>
+        <svg viewBox="0 0 320 220" className="race-svg" aria-hidden="true">
+          <defs><linearGradient id="rgInf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#1f4a35" /><stop offset="1" stopColor="#173626" /></linearGradient></defs>
+          <rect x="0" y="0" width="320" height="220" fill="#0f1a1e" />
+          <path d="M90 40H230A70 70 0 0 1 230 180H90A70 70 0 0 1 90 40Z" fill="url(#rgInf)" stroke="#2d333b" strokeWidth="52" strokeLinejoin="round" />
+          <path d="M90 40H230A70 70 0 0 1 230 180H90A70 70 0 0 1 90 40Z" fill="none" stroke="#ffffff22" strokeWidth="1.5" strokeDasharray="6 8" />
+          <path d="M90 14H230A96 96 0 0 1 230 206H90A96 96 0 0 1 90 14Z" fill="none" stroke="#e8e8e8" strokeOpacity=".5" strokeWidth="2" strokeDasharray="5 5" />
+          <path d="M90 66H230A44 44 0 0 1 230 154H90A44 44 0 0 1 90 66Z" fill="none" stroke="#e8e8e8" strokeOpacity=".5" strokeWidth="2" strokeDasharray="5 5" />
+          <g transform="translate(160 180)"><rect x="-2.500" y="-26" width="5" height="52" fill="#fff" /><rect x="-2.500" y="-26" width="5" height="52" fill="url(#rgChk)" /></g>
+          <defs><pattern id="rgChk" width="5" height="10" patternUnits="userSpaceOnUse"><rect width="5" height="5" fill="#111" /><rect y="5" x="0" width="5" height="5" fill="#fff" /></pattern></defs>
+          <text x="160" y="104" textAnchor="middle" fontSize="11" fontWeight="800" fill="#fff" opacity=".55">{phase === 'run' ? feed[0] ? evText(feed[0]) : '' : 'СТАРТ / ФИНИШ ↓'}</text>
+          {[...RACERS.keys()].sort((a, b) => (a === pick ? 1 : 0) - (b === pick ? 1 : 0)).map(i => {
+            const c = RACERS[i]
+            const [x, y] = trackPos(Math.min(dist[i], RACE_LEN), i)
+            const mine = i === pick
+            return (
+              <g key={c.id} transform={`translate(${x.toFixed(1)} ${y.toFixed(1)})`}>
+                {mine && <circle r="11" fill="none" stroke="#fff" strokeWidth="1.500" opacity=".85" />}
+                <circle r="7.500" fill={c.color} stroke={c.color2} strokeWidth="2" style={{ filter: `drop-shadow(0 0 4px ${c.color})` }} />
+                <text y="3.200" textAnchor="middle" fontSize="9" fontWeight="900" fill="#111">{i + 1}</text>
+              </g>
+            )
+          })}
+        </svg>
+        {count > 0 && <div className="countdown" key={count}>{count}</div>}
+        {phase === 'bet' && <div className="boom m">Выбери машину и сделай ставку</div>}
+        {phase === 'done' && <Burst key={`rb${hist.length}`} type={res?.ok ? 'gold' : 'ember'} n={70} />}
+      </div>
+      <div className="race-lb">
+        {board.map((i, k) => (
+          <div key={i} className={`lb-row ${i === pick ? 'mine' : ''} ${finished[i] ? 'fin' : ''}`} style={{ ['--cc' as string]: RACERS[i].color }}>
+            <b>{k + 1}</b><i className="cdot" /><span>{RACERS[i].name}</span>
+            <em>{finished[i] ? `${sim ? sim.fin[i].toFixed(1).replace('.', ',') : ''} с` : phase === 'run' ? `${Math.max(0, Math.round((dist[i] / RACE_LEN) * 100))}%` : ''}</em>
+          </div>
+        ))}
+      </div>
+      {phase === 'run' && <div className="race-feed">{feed.map((e, i) => <span key={`${e.t}${i}`} className={e.kind}>{evText(e)}</span>)}</div>}
+
+      {res && <Result good={res.ok}>{res.text}</Result>}
+
+      <div className="optrow"><span className="m small">Ставка</span>
+        {([['win', 'Победитель'], ['top3', 'Топ-3']] as [RaceKind, string][]).map(([v, t]) => <button key={v} className={kind === v ? 'on' : ''} disabled={busy} onClick={() => { setKind(v); play.click() }}>{t}</button>)}
+      </div>
+      <div className="race-cars">
+        {RACERS.map((c, i) => (
+          <button key={c.id} className={pick === i ? 'on' : ''} disabled={busy} style={{ ['--cc' as string]: c.color }} onClick={() => { setPick(i); play.click() }}>
+            <i className="cdot" /><b>{i + 1}. {c.name}</b><span>×{odds[i].toFixed(2).replace('.', ',')}</span>
+            <div className="stats"><u>Прямая{bar(c.speed)}</u><u>Поворот{bar(c.corner)}</u><u>Разгон{bar(c.accel)}</u><u>Надёжн.{bar(c.rely)}</u></div>
+            <small>{c.note} · шанс {pct(kind === 'win' ? RACE_PROBS.win[i] : RACE_PROBS.top3[i])}</small>
+          </button>
+        ))}
+      </div>
+      <StakeInput value={stake} onChange={setStake} balance={ctx.save.balance} disabled={busy} />
+      <button className="cta" disabled={busy} onClick={go}>{busy ? (count > 0 ? `Старт через ${count}…` : 'Гонка идёт…') : `Старт · ${money(stake)} · ×${odds[pick].toFixed(2).replace('.', ',')}`}</button>
+      <p className="m small center">Заезд разыгрывается честной симуляцией: стартовая решётка случайная, сильные машины чаще побеждают, но ошибки, нитро и слипстрим дают шанс каждому. Коэффициент = 95% ÷ шанс машины (шансы посчитаны на 800 000 заездов). Отдача 95%: казино всегда в небольшом плюсе.</p>
     </div>
   )
 }

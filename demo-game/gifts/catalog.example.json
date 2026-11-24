@@ -1,0 +1,42 @@
+{
+  "updated": "example",
+  "gifts": [
+    {
+      "id": "1001",
+      "stars": 15,
+      "emoji": "🧸",
+      "thumb": null
+    },
+    {
+      "id": "1002",
+      "stars": 25,
+      "emoji": "💝",
+      "thumb": null
+    },
+    {
+      "id": "1003",
+      "stars": 50,
+      "emoji": "🌹",
+      "thumb": null
+    },
+    {
+      "id": "1004",
+      "stars": 100,
+      "emoji": "🏆",
+      "thumb": null
+    },
+    {
+      "id": "1005",
+      "stars": 100,
+      "emoji": "🚀",
+      "thumb": null
+    },
+    {
+      "id": "1006",
+      "stars": 250,
+      "emoji": "💎",
+      "total": 5000,
+      "thumb": null
+    }
+  ]
+}

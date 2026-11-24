@@ -3,11 +3,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { ArrowDownLeft, ArrowUpRight, ChevronLeft, Gamepad2, Gift, ListChecks, Package, Plus, UserRound, Volume2, VolumeX, X } from 'lucide-react'
 import { Coin, GiftArt, TonIcon, UsdtIcon } from './art'
 import { ACHIEVEMENTS, DAILY_XP, TASK_XP, betXp, levelInfo, rankOf } from './levels'
-import { DEMO } from './lib'
+import { DEMO, SAVE_KEY } from './lib'
+import { tgName } from './auth'
 import { DepositModal, liveRates, ownerDemoUnlocked, useLocalDeposits } from './deposit'
+import { GAME_INFO } from './menuart'
 import {
 
-  Blackjack, Cases, Coinflip, Crash, Mansion, Mines, Plinko, Slots, Storm, Upgrade, type Ctx,
+  Blackjack, Cases, Coinflip, Crash, Mansion, Mines, Plinko, Race, Slots, Storm, Upgrade, type Ctx,
 } from './games'
 import {
   CASE, CASES, GAME_TITLE, caseOddsOf, FLAGS, houseTilt, GIFTS, GIFT_ORDER, COINS_PER_TON, SELL_RATE, STARS_TO_COINS, dateNow, defaultSave, defsFromImport, defsFromNft, loadSave, mergeCatalog, mergeNft, money, persist, setCatalog, todayKey, uid, walkPrices,
@@ -24,17 +26,17 @@ const tabs: { label: Tab; icon: typeof Gamepad2 }[] = [
   { label: 'Задания', icon: ListChecks }, { label: 'Профиль', icon: UserRound },
 ]
 const games: GameDef[] = [
-  { id: 'upgrade', name: 'Апгрейд', image: 'upgrade', players: '1 240', tag: 'HOT', desc: 'Обменяй подарок на более редкий' },
+  { id: 'upgrade', name: 'Апгрейд', image: 'upgrade', players: '1 240', tag: 'HOT', desc: 'Несколько подарков в один редкий' },
   { id: 'storm', name: 'Шторм', image: 'storm', players: '3 410', tag: 'X500', desc: 'Слот 5×3, девять линий' },
   { id: 'rocket', name: 'Ракета', image: 'rocket', players: '2 080', tag: 'LIVE', desc: 'Забери множитель до вылета' },
-  { id: 'cases', name: 'Кейсы', image: 'cases', players: '117', tag: 'NEW', desc: 'Открой кейс, получи подарок' },
+  { id: 'cases', name: 'Кейсы', image: 'cases', players: '117', tag: 'NEW', desc: 'Открой до 10 кейсов за раз' },
   { id: 'slots', name: 'Быстрые слоты', image: 'cases', players: '284', desc: 'Три барабана, один спин' },
   { id: 'mines', name: 'Мины', image: 'mines', players: '29', desc: 'Открывай клетки, избегай мин' },
   { id: 'plinko', name: 'Plinko', image: 'storm', players: '15', desc: 'Шар падает на множитель' },
   { id: 'blackjack', name: 'Блэкджек', image: 'cases', players: '10', desc: 'Набери 21 очко' },
-  { id: 'mansion', name: 'Особняк', image: 'mansion', players: '27', desc: 'Найди награду за дверью' },
+  { id: 'mansion', name: 'Особняк', image: 'mansion', players: '27', tag: 'NEW', desc: 'Поднимайся по этажам, обходи призраков' },
   { id: 'coin', name: 'Орёл и решка', image: 'upgrade', players: '58', tag: 'NEW', desc: 'Серия побед и множитель ×1,9' },
-  { id: 'racing', name: 'Гонки', image: 'racing', players: '42', desc: 'Скоро', soon: true },
+  { id: 'racing', name: 'Гонки', image: 'racing', players: '42', tag: 'NEW', desc: 'Ставь на машину: победитель или топ-3' },
   { id: 'launch', name: 'Запуск', image: 'launch', players: '63', desc: 'Скоро', soon: true },
 ]
 const TITLES: Record<string, string> = Object.fromEntries(games.map(g => [g.id, g.name]))
@@ -62,7 +64,7 @@ export default function App() {
   useEffect(() => { ownerDemoUnlocked().then(setDemoOk) }, [])
   // если сохранение изменили в другой вкладке (например, demo.html), подхватываем без перезагрузки
   useEffect(() => {
-    const h = (e: StorageEvent) => { if (e.key === 'qcup-save-v2') { const s = loadSave(); S.current = s; setSave(s) } }
+    const h = (e: StorageEvent) => { if (e.key === SAVE_KEY) { const s = loadSave(); S.current = s; setSave(s) } }
     window.addEventListener('storage', h)
     return () => window.removeEventListener('storage', h)
   }, [])
@@ -176,7 +178,7 @@ export default function App() {
   }, [commit])
 
   const user = (window as any).Telegram?.WebApp?.initDataUnsafe?.user
-  const displayName: string = user?.first_name || 'Игрок'
+  const displayName: string = tgName(user)
 
   // Пополнения без бэкенда (GitHub Pages): сайт сам находит платёж в блокчейне и добавляет монеты
   useLocalDeposits(useCallback((coins: number, asset: string) => {
@@ -323,6 +325,7 @@ export default function App() {
       case 'blackjack': return <Blackjack ctx={ctx} />
       case 'mansion': return <Mansion ctx={ctx} />
       case 'coin': return <Coinflip ctx={ctx} />
+      case 'racing': return <Race ctx={ctx} />
       default: return <p className="m center">Режим появится позже.</p>
     }
   }
@@ -358,7 +361,12 @@ export default function App() {
     <div className="bg-glow" />
     {header}
 
-    {game ? <section className="game-view">{view(game)}</section> : <>
+    {game ? <section className="game-view" data-game={game}>
+      <div className="game-banner"><div className="gb-art"><img src={`./games/${games.find(x => x.id === game)?.image}.webp`} alt="" /></div>
+        <div className="gb-text"><b>{TITLES[game]}</b><span>{GAME_INFO[game]?.sub}</span>
+          <div className="gb-chips">{GAME_INFO[game]?.chips.map(c => <i key={c}>{c}</i>)}</div></div></div>
+      {view(game)}
+    </section> : <>
       {tab === 'Игры' && <>
         <button className={`daily-banner ${dailyReady ? 'ready' : ''}`} onClick={() => setTab('Задания')}>
           <div><b>Ежедневный вход</b><span>{dailyReady ? 'Отметь визит' : 'Отмечено, приходи завтра'} · день {Math.max(1, save.daily.streak)} из 7</span></div>
@@ -370,7 +378,7 @@ export default function App() {
               <div className="card-art-wrap"><img src={`./games/${g.image}.webp`} alt="" /><div className="card-glare" /></div>
               {!g.soon && <span className="players"><i /> {g.players} играют</span>}
               {g.tag && <span className={`game-tag ${g.tag}`}>{g.tag}</span>}
-              <b>{g.name}</b><p className="card-desc">{g.desc}</p>
+              <div className="card-glass"><b>{g.name}</b><p className="card-desc">{g.desc}</p></div>
             </button>
           ))}
         </section>
@@ -443,7 +451,7 @@ export default function App() {
           </div>
         </div>}
         <h2 className="section-title">Правила игры</h2>
-        <p className="fine-print">Во всех играх отдача игроку ниже 100%: казино всегда в плюсе, как и в настоящих. Если игрок долго выигрывает больше обычного, шансы в играх понемногу ухудшаются. Так игра показывает, что у казино нельзя выиграть в долгую.</p>
+        <p className="fine-print">Во всех играх отдача игроку ниже 100%: казино всегда в плюсе, как и в настоящих. В Plinko, Апгрейде, Кейсах, Особняке и Гонках шансы всегда ровно такие, как показаны на экране. В остальных играх, если игрок долго выигрывает больше обычного, шансы понемногу ухудшаются.</p>
         <button className="outline-btn" onClick={reset}>Сбросить прогресс</button>
       </section>}
 

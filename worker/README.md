@@ -6,8 +6,8 @@
 ## Один раз в Cloudflare (dash.cloudflare.com, бесплатно)
 1. Зарегистрируйтесь.
 2. **Account ID**: страница «Workers & Pages» (или Overview), справа в колонке. Скопируйте.
-3. Ключ доступа: My Profile → API Tokens → Create Token → Create Custom Token. Права (Account): **Workers Scripts: Edit** и **D1: Edit**. Скопируйте токен (показывают один раз).
-Базу данных создавать не нужно, это делает workflow.
+3. Ключ доступа: My Profile → API Tokens → Create Token (можно шаблон «Edit Cloudflare Workers»). Нужны права (Account): **Workers Scripts: Edit** и **D1: Read** (лучше Edit). Account Resources: ваш аккаунт. Скопируйте токен (показывают один раз).
+4. База данных: Storage & databases → D1 → Create database, имя строго `qcup`. Таблицы в ней Worker создаёт сам.
 
 ## Один раз в GitHub: четыре секрета
 Репозиторий → Settings → Secrets and variables → Actions → New repository secret:

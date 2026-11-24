@@ -26,6 +26,8 @@ try {
   slugs = Object.keys(fl)
   let nm = {}
   try { nm = JSON.parse(await (await import('node:fs/promises')).readFile(path.join(out, 'names.json'), 'utf8')) } catch {}
+  // локальный файл с ценами: игра читает его первым, поэтому NFT появляются мгновенно
+  await writeFile(path.join(out, '..', 'nft.json'), JSON.stringify({ updated: new Date().toISOString(), collections: Object.entries(fl).filter(([, v]) => v > 0).map(([id, floorTon]) => ({ id, name: nm[id] || id, floorTon })) }))
 }
 catch { console.log('Иконки NFT: не удалось получить список коллекций, пропускаю.'); process.exit(0) }
 

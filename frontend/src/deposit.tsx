@@ -14,6 +14,9 @@ const raw = env.VITE_API_URL as string | undefined
 // Пока адреса нет, платежи проверяет браузер (режим «без сервера»); когда есть, всё идёт через сервер (Cloudflare Worker или VPS).
 let API = raw === 'same' ? '' : raw?.replace(/\/$/, '')
 let LOCAL = API === undefined
+// Смешанный режим: платежи Stars идут через сервер (Worker), а TON и USDT проверяет сам сайт по блокчейну (как без сервера).
+// Включается, когда в config.json одновременно заданы apiUrl и адрес кошелька (tonAddress / trc20Address).
+let HYBRID = false
 
 export type Method = 'TON' | 'USDT_TON' | 'USDT_TRC20' | 'STARS'
 export const METHOD_LABEL: Record<Method, string> = { TON: 'TON', USDT_TON: 'USDT (сеть TON)', USDT_TRC20: 'USDT (сеть TRON, TRC20)', STARS: 'Telegram Stars' }
@@ -55,7 +58,7 @@ export function siteConfig(): Promise<SiteCfg> {
     }
     try { const r = await fetch(`./config.json?t=${Date.now()}`, { cache: 'no-store' }); if (r.ok) merge(await r.json()) } catch { /* файла нет: берём VITE_* */ }
     try { merge(JSON.parse(localStorage.getItem('qcup-config-override') || 'null')) } catch { /* тестовая настройка из админки (только на этом устройстве) */ }
-    if (base.apiUrl) { API = base.apiUrl; LOCAL = false }
+    if (base.apiUrl) { API = base.apiUrl; LOCAL = false; HYBRID = !!(base.tonAddress || base.trc20Address) }
     return base
   })()
   return cfgP
@@ -209,12 +212,13 @@ export function useLocalDeposits(onCredit: (coins: number, asset: string) => voi
       if (busy || dead) return
       busy = true
       try {
-        if (LOCAL) {
+        if (LOCAL || HYBRID) {
           for (const c of await withLock(checkOnce)) {
             onCredit(c.coins, METHOD_LABEL[c.method])
             window.dispatchEvent(new CustomEvent('qcup-dep', { detail: c }))
           }
-        } else if (initData()) {
+        }
+        if (!LOCAL && initData()) {
           const r = await fetch(`${API}/api/deposit/unclaimed`, { headers: hdr() })
           const rows = r.ok ? ((await r.json()) as { id: string; coins: string; asset: string }[]) : []
           if (rows.length) {
@@ -247,7 +251,7 @@ async function testStars(memo: string, coins: number) {
 const initData = () => (window as any).Telegram?.WebApp?.initData || ''
 const hdr = () => ({ 'content-type': 'application/json', 'x-telegram-init-data': initData() })
 
-type Cfg = { tonAddress: string; trc20Address: string; methods: Record<Method, boolean>; ttlMin: number; min: { ton: number; usdt: number; stars: number }; max: { ton: number; usdt: number; stars: number }; rate: { ton: number; usdt: number; stars: number } }
+type Cfg = { localCrypto?: boolean; tonAddress: string; trc20Address: string; methods: Record<Method, boolean>; ttlMin: number; min: { ton: number; usdt: number; stars: number }; max: { ton: number; usdt: number; stars: number }; rate: { ton: number; usdt: number; stars: number } }
 type Intent = { memo: string; method: Method; address: string; amount: string; sender?: string; jettonMaster?: string | null; invoice?: string }
 
 export function DepositModal({ onClose, onNotice }: { onClose: () => void; onNotice: (s: string) => void }) {
@@ -259,21 +263,24 @@ export function DepositModal({ onClose, onNotice }: { onClose: () => void; onNot
   const [intent, setIntent] = useState<Intent | null>(null)
   const [status, setStatus] = useState<'pending' | 'credited' | 'expired'>('pending')
   const timer = useRef(0)
+  const localFlow = (m: Method) => LOCAL || (m !== 'STARS' && !!cfg?.localCrypto) // способ проверяет сам сайт, а не сервер
 
   useEffect(() => {
     let t = 0, dead = false
     siteConfig().then(async c => {
       if (dead) return
       if (!LOCAL) { // режим с сервером
-        fetch(`${API}/api/deposit/config`).then(r => (r.ok ? r.json() : Promise.reject())).then(j => {
+        fetch(`${API}/api/deposit/config`).then(r => (r.ok ? r.json() : Promise.reject())).then(async j => {
           const st = j.stars || {}
-          const methods = { TON: !!j.address, USDT_TON: !!j.address, USDT_TRC20: false, STARS: !!st.enabled }
+          const lc = !j.address && HYBRID // сервер без TON: крипту принимает сам сайт, адреса из config.json
+          const lr = lc ? await liveRates() : null
+          const methods = { TON: !!j.address || (lc && c.methods.TON && !!c.tonAddress), USDT_TON: !!j.address || (lc && c.methods.USDT_TON && !!c.tonAddress), USDT_TRC20: lc && c.methods.USDT_TRC20 && !!c.trc20Address, STARS: !!st.enabled }
           const first = ALL_METHODS.find(m => methods[m])
           if (first) { setMethod(first); setAmount(first === 'TON' ? '1' : first === 'STARS' ? '100' : '10') }
           setCfg({
-            tonAddress: j.address || '', trc20Address: '', methods, ttlMin: j.ttlMin,
-            min: { ton: j.minTon, usdt: j.usdt?.min ?? 1, stars: st.min ?? 10 }, max: { ton: j.maxTon, usdt: j.usdt?.max ?? 5000, stars: st.max ?? 100000 },
-            rate: { ton: j.coinsPerTon, usdt: j.usdt?.coinsPerUsdt ?? 100, stars: st.coinsPerStar ?? 1 },
+            localCrypto: lc, tonAddress: lc ? c.tonAddress : j.address || '', trc20Address: lc ? c.trc20Address : '', methods, ttlMin: lc ? c.ttlMin : j.ttlMin,
+            min: { ton: lc ? c.min.ton : j.minTon, usdt: lc ? c.min.usdt : j.usdt?.min ?? 1, stars: st.min ?? 10 }, max: { ton: lc ? c.max.ton : j.maxTon, usdt: lc ? c.max.usdt : j.usdt?.max ?? 5000, stars: st.max ?? 100000 },
+            rate: { ton: lr ? lr.ton : j.coinsPerTon, usdt: lr ? lr.usdt : j.usdt?.coinsPerUsdt ?? 100, stars: st.coinsPerStar ?? 1 },
           })
         }).catch(() => setErr('Пополнение сейчас недоступно.'))
         return
@@ -293,14 +300,14 @@ export function DepositModal({ onClose, onNotice }: { onClose: () => void; onNot
   }, [])
 
   useEffect(() => {
-    if (!LOCAL || !intent) return
+    if (!intent || !localFlow(intent.method)) return
     const h = (e: Event) => { if ((e as CustomEvent).detail.memo === intent.memo) setStatus('credited') }
     window.addEventListener('qcup-dep', h)
     return () => window.removeEventListener('qcup-dep', h)
   }, [intent])
 
   useEffect(() => {
-    if (LOCAL || !intent || status !== 'pending') return
+    if (!intent || localFlow(intent.method) || status !== 'pending') return
     const tick = async () => {
       try {
         const r = await fetch(`${API}/api/deposit/ton/${intent.memo}`, { headers: hdr() })
@@ -360,7 +367,7 @@ export function DepositModal({ onClose, onNotice }: { onClose: () => void; onNot
       return
     }
     if (!senderOk) return setErr(method === 'USDT_TRC20' ? 'Укажите адрес TRON-кошелька (начинается с T), с которого будете платить.' : 'Укажите адрес TON-кошелька, с которого будете платить.')
-    if (LOCAL) {
+    if (localFlow(method)) {
       const rnd = crypto.getRandomValues(new Uint8Array(9))
       const memo = 'qc-' + [...rnd].map(b => (b % 36).toString(36)).join('').padEnd(12, '0').slice(0, 12)
       const st = loadStore()
@@ -413,7 +420,7 @@ export function DepositModal({ onClose, onNotice }: { onClose: () => void; onNot
         <label className="dep-lab">Сумма, {unit}</label>
         <input className="dep-input" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} />
         <div className="dep-quick">{(isStars ? [50, 100, 500, 1000] : isUsdt ? [5, 10, 50, 100] : [0.5, 1, 5, 10]).map(v => <button key={v} onClick={() => setAmount(String(v))}>{v}</button>)}</div>
-        {isUsdt && LOCAL && <>
+        {isUsdt && localFlow(method) && <>
           <label className="dep-lab">Адрес вашего кошелька, с которого платите ({method === 'USDT_TRC20' ? 'TRON' : 'TON'})</label>
           <input className="dep-input dep-mono" placeholder={method === 'USDT_TRC20' ? 'T…' : 'UQ… / EQ…'} value={sender} onChange={e => setSender(e.target.value)} />
           <p className="dep-hint">Платёж привязывается к вам по этому адресу и точной сумме. С чужого адреса он не засчитается.</p>

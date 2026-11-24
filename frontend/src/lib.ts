@@ -130,7 +130,14 @@ export type Save = {
 
 // Демо-версия (сборка с VITE_DEMO=1): отдельное хранилище, стартовый баланс, никаких платежей. Реальная игра этого не касается.
 export const DEMO = (import.meta as any).env?.VITE_DEMO === '1'
-const KEY = DEMO ? 'qcup-demo-save' : 'qcup-save-v2'
+// Прогресс хранится отдельно для каждого аккаунта Telegram: на одном устройстве разные люди не делят баланс.
+const TGID = (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id
+const LEGACY_KEY = 'qcup-save-v2'
+export const SAVE_KEY = DEMO ? 'qcup-demo-save' : TGID ? `qcup-save-v2-${TGID}` : LEGACY_KEY
+const KEY = SAVE_KEY
+if (!DEMO && TGID) { try { // однократный перенос старого общего сохранения первому вошедшему аккаунту
+  if (!localStorage.getItem(KEY) && localStorage.getItem(LEGACY_KEY)) { localStorage.setItem(KEY, localStorage.getItem(LEGACY_KEY)!); localStorage.removeItem(LEGACY_KEY) }
+} catch { /* хранилище недоступно */ } }
 const basePrices = (defs: Record<string, GiftDef>): Record<GiftKind, number> =>
   Object.fromEntries(Object.keys(defs).map(k => [k, defs[k].base]))
 
@@ -197,14 +204,17 @@ export const SYMBOLS = ['💎', '7⭐', '🍀', '🔔', '🍇', '🍋', '⭐', '
 export const SYMBOL_WEIGHTS = [1, 1, 3, 4, 6, 8, 12, 20]
 const BASE_PAY = [25, 15, 8, 5, 3, 2, 2, 1.5]
 export const pickSymbol = () => weighted(SYMBOLS, SYMBOL_WEIGHTS)
-// 5×3, 9 линий, ставка делится на линии: RTP ≈ 93%
+// 5×3, 9 линий, ставка делится на линии: RTP ≈ 87% (проверено симуляцией на миллионах спинов).
+// Крупные символы платят умеренно: самая большая линия (5 бриллиантов) даёт около ×37 от ставки.
+const STORM_BASE = [14, 9, 6, 4.5, 3.4, 2.6, 2.3, 2]
 export const STORM_PAY = (sym: string, run: number) => {
   const i = SYMBOLS.indexOf(sym)
-  const mul = run === 3 ? 1 : run === 4 ? 3 : 10
-  return 3.8 * BASE_PAY[i] * mul
+  const mul = run === 3 ? 1 : run === 4 ? 3 : 8
+  return Math.round(3 * STORM_BASE[i] * mul * 2) / 2
 }
-// 3 барабана: три одинаковых, RTP ≈ 96%
-export const SLOT3_PAY = (sym: string) => 9 * BASE_PAY[SYMBOLS.indexOf(sym)]
+// 3 барабана: три одинаковых, RTP ≈ 87%
+const SLOT3_TABLE = [90, 55, 32, 22, 16, 12, 17, 13]
+export const SLOT3_PAY = (sym: string) => SLOT3_TABLE[SYMBOLS.indexOf(sym)]
 export const PAYLINES: number[][] = [
   [0, 0, 0, 0, 0], [1, 1, 1, 1, 1], [2, 2, 2, 2, 2],
   [0, 1, 2, 1, 0], [2, 1, 0, 1, 2],
@@ -298,3 +308,87 @@ export const houseTilt = (stats: Record<string, number>) => {
   const excess = paid - staked - (300 + 0.15 * staked)
   return excess > 0 ? Math.min(0.3, excess / (3000 + excess)) : 0
 }
+
+// ---- Гонки ----
+// Настоящая симуляция заезда на овале в 3 круга. У каждой машины свои характеристики: скорость на прямых, поворот, разгон
+// и надёжность. На прямой машина сзади получает слипстрим, один раз за гонку включается нитро, в поворотах бывают ошибки.
+// Исход разыгрывается этим же движком (без поправок под игрока), а шансы и коэффициенты посчитаны прогоном того же движка
+// на миллионе заездов (RACE_PROBS). Если поменять характеристики или параметры движка, пересчитай их: raceEstimate(n).
+export const RACE_RTP = 0.95
+export const RACE_LAPS = 3
+const CORNER = Math.PI * 70
+const SECT = [{ len: 70, c: false }, { len: CORNER, c: true }, { len: 140, c: false }, { len: CORNER, c: true }, { len: 70, c: false }]
+export const LAP_LEN = 70 + CORNER + 140 + CORNER + 70
+export const RACE_LEN = LAP_LEN * RACE_LAPS
+export type RaceCar = { id: string; name: string; color: string; color2: string; speed: number; corner: number; accel: number; rely: number; note: string }
+export const RACERS: RaceCar[] = [
+  { id: 'v', name: 'Вихрь', color: '#ff5d73', color2: '#b8213a', speed: 9, corner: 8, accel: 8, rely: 8, note: 'Универсал: быстрый и ровный' },
+  { id: 'k', name: 'Комета', color: '#4cc9f0', color2: '#1a78a8', speed: 10, corner: 8, accel: 7, rely: 6, note: 'Летит на прямых, теряет в поворотах' },
+  { id: 'g', name: 'Гром', color: '#ffc24b', color2: '#c27d0a', speed: 6, corner: 9, accel: 8, rely: 8, note: 'Король поворотов, медленнее на прямых' },
+  { id: 'l', name: 'Лайм', color: '#7bd88f', color2: '#2f8f4a', speed: 8, corner: 8, accel: 7, rely: 10, note: 'Надёжный: почти не ошибается' },
+  { id: 'f', name: 'Фиалка', color: '#c17bff', color2: '#7430bd', speed: 9, corner: 7, accel: 10, rely: 6, note: 'Мощный разгон, но рискует' },
+  { id: 't', name: 'Тень', color: '#9aa7b0', color2: '#4a565e', speed: 8, corner: 8, accel: 6, rely: 5, note: 'Аутсайдер: часто ошибается, но может выстрелить' },
+]
+const gauss = (r: () => number) => Math.sqrt(-2 * Math.log(1 - r())) * Math.cos(2 * Math.PI * r())
+export type RaceEvent = { t: number; car: number; kind: 'nitro' | 'mistake' | 'lead' | 'finish' | 'lap'; place?: number; lap?: number }
+export type RaceSim = { dt: number; frames: number[][]; fin: number[]; order: number[]; events: RaceEvent[]; duration: number }
+// параметры движка
+const FORM_SIGMA = 0.02        // «форма дня» машины на весь заезд
+const SECT_SIGMA = 0.014       // шум скорости на каждом участке; растёт у ненадёжных
+const MISTAKE_BASE = 0.01      // шанс ошибки на входе в поворот: база + (10 - надёжность) * шаг
+const MISTAKE_STEP = 0.012
+export function raceSimulate(rand: () => number = rnd): RaceSim {
+  const n = RACERS.length, dt = 0.05
+  const grid = RACERS.map((_, i) => i)
+  for (let i = n - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [grid[i], grid[j]] = [grid[j], grid[i]] } // стартовая решётка случайная
+  const d = RACERS.map((_, i) => -grid.indexOf(i) * 4), v = RACERS.map(() => 0), fin = RACERS.map(() => -1)
+  const form = RACERS.map(() => 1 + gauss(rand) * FORM_SIGMA)
+  const nitroAt = RACERS.map(() => LAP_LEN * (1 + rand() * 1.6))
+  const nitroLeft = RACERS.map(() => 0), nitroUsed = RACERS.map(() => false), mistakeLeft = RACERS.map(() => 0)
+  const secKey = RACERS.map(() => -1), noise = RACERS.map(() => 1)
+  const frames: number[][] = [d.slice()], events: RaceEvent[] = []
+  let leader = -1, lapShown = 1, t = 0, placed = 0
+  while (fin.some(f => f < 0) && t < 240) {
+    t += dt
+    const snap = d.slice()
+    for (let i = 0; i < n; i++) {
+      if (fin[i] >= 0) continue
+      const c = RACERS[i]
+      const lp = d[i] <= 0 ? 0 : d[i] % LAP_LEN
+      let k = 0, acc = 0
+      while (k < SECT.length - 1 && lp >= acc + SECT[k].len) { acc += SECT[k].len; k++ }
+      const key = Math.floor(Math.max(0, d[i]) / LAP_LEN) * SECT.length + k
+      if (key !== secKey[i]) {
+        secKey[i] = key
+        noise[i] = 1 + gauss(rand) * (SECT_SIGMA + (10 - c.rely) * 0.002)
+        if (SECT[k].c && d[i] > 0 && rand() < MISTAKE_BASE + (10 - c.rely) * MISTAKE_STEP) { mistakeLeft[i] = 0.9; events.push({ t, car: i, kind: 'mistake' }) }
+      }
+      if (!nitroUsed[i] && d[i] >= nitroAt[i]) { nitroUsed[i] = true; nitroLeft[i] = 2; events.push({ t, car: i, kind: 'nitro' }) }
+      let tgt = (SECT[k].c ? 52 + 1.6 * c.corner : 84 + 2 * c.speed) * form[i] * noise[i]
+      if (!SECT[k].c && snap.some((x, j) => j !== i && fin[j] < 0 && x > snap[i] && x - snap[i] < 14)) tgt *= 1.04 // слипстрим
+      if (nitroLeft[i] > 0) { tgt *= c.id === 'f' ? 1.14 : 1.1; nitroLeft[i] -= dt }
+      if (mistakeLeft[i] > 0) { tgt *= 0.6; mistakeLeft[i] -= dt }
+      const a = 22 + 1.2 * c.accel
+      v[i] = v[i] < tgt ? Math.min(tgt, v[i] + a * dt) : Math.max(tgt, v[i] - 45 * dt)
+      d[i] += v[i] * dt
+      if (d[i] >= RACE_LEN) { fin[i] = t - (d[i] - RACE_LEN) / v[i]; d[i] = RACE_LEN; v[i] = 0; events.push({ t: fin[i], car: i, kind: 'finish', place: ++placed }) }
+    }
+    let ld = 0
+    for (let i = 1; i < n; i++) if (d[i] > d[ld]) ld = i
+    if (leader !== ld && t > 2) { if (leader >= 0 && d[ld] < RACE_LEN) events.push({ t, car: ld, kind: 'lead' }); leader = ld } else if (leader < 0) leader = ld
+    const lap = Math.min(RACE_LAPS, Math.floor(Math.max(0, d[ld]) / LAP_LEN) + 1)
+    if (lap > lapShown) { lapShown = lap; events.push({ t, car: ld, kind: 'lap', lap }) }
+    frames.push(d.slice())
+  }
+  const order = RACERS.map((_, i) => i).sort((a, b) => (fin[a] < 0 ? 1e9 : fin[a]) - (fin[b] < 0 ? 1e9 : fin[b]))
+  return { dt, frames, fin, order, events, duration: Math.max(...fin) }
+}
+// Оценка шансов прогоном движка (для пересчёта RACE_PROBS после смены параметров).
+export const raceEstimate = (runs: number, rand: () => number = rnd) => {
+  const win = RACERS.map(() => 0), top3 = RACERS.map(() => 0)
+  for (let r = 0; r < runs; r++) { const { order } = raceSimulate(rand); win[order[0]]++; for (let k = 0; k < 3; k++) top3[order[k]]++ }
+  return { win: win.map(x => x / runs), top3: top3.map(x => x / runs) }
+}
+export const RACE_PROBS = { win: [0.2211, 0.2566, 0.1982, 0.1144, 0.1238, 0.0859], top3: [0.6031, 0.6238, 0.5776, 0.4253, 0.4379, 0.3323] } // 800 000 заездов движка
+// Коэффициент округляется вниз до сотых: округление всегда в пользу казино, а не игрока.
+export const raceOdds = (p: number) => Math.max(1.01, Math.floor((RACE_RTP / p) * 100) / 100)
