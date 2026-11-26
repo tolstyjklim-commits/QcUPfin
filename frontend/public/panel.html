@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>QcUp · админ-панель</title>
+<style>
+:root{--bg:#0f1512;--p:#18211c;--p2:#202c25;--t:#e8f0ea;--m:#8fa396;--a:#59d49a;--r:#ff8da1;--y:#f1d58a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t);font:14px/1.4 system-ui,sans-serif}
+header{display:flex;gap:12px;align-items:center;padding:12px 16px;background:var(--p);position:sticky;top:0;z-index:5;flex-wrap:wrap}
+header h1{font-size:16px;margin:0 8px 0 0}nav{display:flex;gap:4px;flex-wrap:wrap}
+button,input,select,textarea{font:inherit;color:inherit;background:var(--p2);border:1px solid #2b3a31;border-radius:8px;padding:7px 11px}
+button{cursor:pointer}button.on,button.pri{background:var(--a);color:#06241a;border-color:var(--a);font-weight:700}button.bad{background:#3a1a22;border-color:#6b2d3a;color:var(--r)}
+main{padding:16px;max-width:1200px;margin:auto}.card{background:var(--p);border-radius:14px;padding:14px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}.kpi{background:var(--p2);border-radius:12px;padding:12px}.kpi b{display:block;font-size:20px}.kpi span{color:var(--m);font-size:12px}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:7px 8px;border-bottom:1px solid #26332b;vertical-align:top}th{color:var(--m);font-weight:600;font-size:12px}
+.wrap{overflow-x:auto}.mono{font-family:ui-monospace,monospace;font-size:12px;word-break:break-all}.tag{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;background:#3a3016;color:var(--y);margin:1px}
+.tag.approved{background:#173a2a;color:var(--a)}.tag.rejected{background:#3a1a22;color:var(--r)}.tag.flag{background:#3a1a22;color:var(--r)}
+.pos{color:var(--a)}.neg{color:var(--r)}.muted{color:var(--m)}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}a.l{color:var(--a);cursor:pointer;text-decoration:underline}
+#login{max-width:420px;margin:12vh auto;text-align:center}#login input{width:100%;margin:10px 0}.hide{display:none}
+.demo{background:#3a3016;color:var(--y);padding:8px 12px;border-radius:10px;margin-bottom:12px}
+
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0}.tabs button{padding:8px 14px}
+.bar{height:10px;border-radius:6px;background:#26332b;overflow:hidden;min-width:120px}.bar i{display:block;height:100%}
+svg text{fill:#8fa396;font-size:11px}svg .ax{stroke:#2b3a31}.chart{width:100%;height:auto;background:var(--p2);border-radius:12px}
+.legend span{display:inline-flex;align-items:center;gap:5px;margin-right:12px;color:var(--m);font-size:12px}.legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:14px}@media(max-width:520px){.cols{grid-template-columns:1fr}}
+</style></head><body>
+<div id="login" class="card"><h2>QcUp · админ-панель</h2>
+<p class="muted">Адрес сервера и ключ администратора (ADMIN_KEY). Ключ хранится только в этой вкладке.</p>
+<input id="base" placeholder="https://qcup-pay.<имя>.workers.dev" autocomplete="off">
+<input id="key" type="password" placeholder="ADMIN_KEY" autocomplete="off">
+<div class="row" style="justify-content:center"><button class="pri" id="go">Войти</button><button id="demo">Демо без сервера</button></div>
+<p id="lerr" class="neg"></p></div>
+<div id="app" class="hide"><header><h1>QcUp · админ</h1>
+<nav id="nav"></nav><span style="flex:1"></span><button id="refresh">Обновить</button><button id="out">Выйти</button></header>
+<main><div id="demoBar" class="demo hide">Демо: данные выдуманы, действия никуда не отправляются.</div><div id="view"></div></main></div>
+<script>
+'use strict';
+// Весь вывод через textContent: имена и адреса игроков никогда не попадают в HTML как разметка.
+const $=s=>document.querySelector(s);
+const h=(tag,attrs,...kids)=>{const e=document.createElement(tag);for(const[k,v]of Object.entries(attrs||{})){if(k==='class')e.className=v;else if(k.startsWith('on'))e.addEventListener(k.slice(2),v);else if(v!==false&&v!=null)e.setAttribute(k,v)}
+ for(const c of kids.flat())if(c!=null&&c!==false)e.append(c.nodeType?c:document.createTextNode(String(c)));return e};
+const fm=n=>Number(n||0).toLocaleString('ru-RU'),usd=c=>(c/100).toFixed(2)+' USD',dt=t=>t?new Date(t).toLocaleString('ru-RU'):'—';
+const who=r=>(r.name||'без имени')+(r.username?' @'+r.username:'')+' · '+r.tg_id;
+let BASE='',KEY='',DEMO=false,TAB='wd',DETAIL=null;
+const ST={pending:'в обработке',approved:'принята',rejected:'отклонена'};
+// Демо-данные собираются симуляцией: баланс = пополнения + бонусы + выигрыши − ставки − выводы, поэтому все цифры сходятся.
+const DEMO_DATA=(()=>{const now=Date.now(),DAY=864e5,G=['Ракета','Плинко','Мины','Колесо'];
+ const rng=s=>()=>(s=(s*1664525+1013904223)>>>0)/4294967296;
+ const addr=m=>m==='USDT_TRC20'?'T'+'k'.repeat(33):'UQ'+'B'.repeat(46);
+ const build=(i,name,username,plan)=>{const R=rng(7+i*13),tg=1000+i,ev=[],dep=[],bonus=[],wd=[];let bal=0,rounds=0,t0=now-14*DAY,wi=0;
+  const fin=[];
+  for(const [d,asset,usd] of plan.deposits)fin.push({t:now-d*DAY,k:'dep',asset,usd});
+  for(const [d,coins,method,status] of plan.withdrawals)fin.push({t:now-d*DAY,k:'wd',coins,method,status});
+  if(plan.ref)fin.push({t:now-9*DAY,k:'ref',coins:plan.ref});
+  if(plan.sale)fin.push({t:now-5*DAY,k:'sale',coins:plan.sale});
+  for(let d=13;d>=0;d-=2)fin.push({t:now-d*DAY+36e5,k:'bonus',coins:5});
+  fin.sort((a,b)=>a.t-b.t);
+  for(let t=t0;t<=now;t+=40*60*1000){
+   while(fin.length&&fin[0].t<=t){const f=fin.shift();
+    if(f.k==='dep'){const coins=f.asset==='STARS'?f.usd:Math.round(f.usd*100);bal+=coins;dep.push({memo:'d'+dep.length,asset:f.asset,stars:f.asset==='STARS'?f.usd:Math.round(f.usd*100),coins,status:'credited',credited_at:f.t,usd:f.asset==='STARS'?+(f.usd*0.015).toFixed(2):f.usd});ev.push({t:f.t,kind:'bal',game:'',amount:bal})}
+    else if(f.k==='bonus'){bal+=f.coins;ev.push({t:f.t,kind:'bonus',game:'Ежедневный вход',amount:f.coins})}
+    else if(f.k==='sale'){bal+=f.coins;ev.push({t:f.t,kind:'sale',game:'Продажа подарков',amount:f.coins})}
+    else if(f.k==='ref'){bal+=f.coins;bonus.push({asset:'REF',coins:f.coins,credited_at:f.t})}
+    else if(f.k==='wd'){const coins=Math.min(f.coins,bal);if(coins<500)continue;bal-=coins;
+     const st=f.method==='STARS',w={id:'wd-demo'+i+'w'+(wi++),tg_id:tg,name,username,coins,usd_cents:coins,stars:st?coins:null,method:f.method,address:st?'tg:'+tg:addr(f.method),flags:'',status:f.status,created_at:f.t,decided_at:f.status==='pending'?null:f.t+36e5,txid:f.status==='approved'?'demo-tx':'',admin_note:f.status==='approved'?'Выплачено':''};wd.push(w);ev.push({t:f.t+1,kind:'bal',game:'',amount:bal})}}
+   if(bal>=100&&R()<0.55){const g=G[Math.floor(R()*4)],bet=Math.min(bal,[100,200,500,1000][Math.floor(R()*4)]);bal-=bet;rounds++;ev.push({t,kind:'bet',game:g,amount:bet});
+    if(R()<0.48){const win=Math.round(bet*plan.rtp/0.48*(0.7+R()*0.6));bal+=win;ev.push({t:t+2e3,kind:'win',game:g,amount:win})}
+    if(rounds%8===0)ev.push({t:t+3e3,kind:'bal',game:'',amount:bal})}}
+  ev.push({t:now-1e3,kind:'bal',game:'',amount:bal});
+  const sum=(k,g)=>ev.filter(e=>e.kind===k&&(!g||e.game===g)).reduce((n,e)=>n+e.amount,0);
+  const perGame=G.map(g=>({game:g,rounds:ev.filter(e=>e.kind==='bet'&&e.game===g).length,staked:sum('bet',g),won:sum('win',g)})).filter(x=>x.rounds).sort((a,b)=>b.staked-a.staked);
+  const big=Math.max(0,...ev.filter(e=>e.kind==='win').map(e=>e.amount));
+  const pl={tg_id:tg,name,username,first_seen:now-13*DAY,last_seen:now-36e5*i,balance:bal,level:2+i,rounds,staked:sum('bet'),won:sum('win'),big_win:big,note:'',mirror_at:0};
+  return{pl,ev:ev.sort((a,b)=>b.t-a.t),dep,bonus,wd,perGame}};
+ const P=[
+  build(1,'Алексей','alex_k',{rtp:0.85,deposits:[[13,'SEND',100],[6,'TON',100]],withdrawals:[[1,1000,'STARS','pending']]}),
+  build(2,'Мария','',{rtp:0.95,deposits:[[12,'WALLET',300],[8,'SEND',200]],ref:250,sale:1500,withdrawals:[[4,5000,'TON','approved'],[1,3000,'TON','pending']]}),
+  build(3,'Игорь','igor77',{rtp:2.6,deposits:[[11,'STARS',500]],ref:250,withdrawals:[[1,2500,'USDT_TRC20','pending']]})];
+ const wd=P.flatMap(x=>x.wd).sort((a,b)=>b.created_at-a.created_at);
+ for(const w of wd){const x=P.find(q=>q.pl.tg_id===w.tg_id);if(w.method!=='STARS'&&!x.dep.length)w.flags='нет пополнений';if(x.pl.won-x.pl.staked>0&&w.status==='pending')w.flags=(w.flags?w.flags+'; ':'')+'выиграл больше, чем внёс'}
+ return{P,wd}})();
+const demoTotals=x=>{const dep=x.dep.reduce((n,d)=>n+d.coins,0),wds=DEMO_DATA.wd.filter(w=>w.tg_id===x.pl.tg_id),paid=wds.filter(w=>w.status==='approved').reduce((n,w)=>n+w.coins,0),pend=wds.filter(w=>w.status==='pending').reduce((n,w)=>n+w.coins,0),p=x.pl;
+ return{dep,paid,pend,t:{depositedCoins:dep,depositedUsd:+x.dep.reduce((n,d)=>n+d.usd,0).toFixed(2),depositsCount:x.dep.length,withdrawnCoins:paid,withdrawnPending:pend,staked:p.staked,won:p.won,pnlPlayer:p.won-p.staked,rtp:p.staked?+(p.won/p.staked*100).toFixed(1):null,rounds:p.rounds,bigWin:p.big_win,cashNetCoins:dep-paid,balanceReported:p.balance,verifiedNote:'Пополнения проверены сервером. Ставки, выигрыши и баланс присланы клиентом и не проверены.'}}};
+async function api(path,opt={}){
+ if(DEMO)return demoApi(path,opt);
+ const r=await fetch(BASE+'/admin/api'+path,{method:opt.method||'GET',headers:{authorization:'Bearer '+KEY,'content-type':'application/json'},body:opt.body?JSON.stringify(opt.body):undefined});
+ const j=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(new Error(j.error||('HTTP '+r.status)),{status:r.status});return j}
+function demoApi(path,opt){
+ const D=DEMO_DATA;
+ if(path==='/overview'){const w=D.wd,s=x=>w.filter(q=>q.status===x),c=a=>a.reduce((n,q)=>n+q.usd_cents,0);return{withdrawals:{pending:s('pending').length,approved:s('approved').length,rejected:s('rejected').length,paidCents:c(s('approved')),pendingCents:c(s('pending'))},deposits:{n:D.P.reduce((n,x)=>n+x.dep.length,0),coins:D.P.reduce((n,x)=>n+x.dep.reduce((m,d)=>m+d.coins,0),0),cents:0,stars:0},players:{n:D.P.length,staked:D.P.reduce((n,x)=>n+x.pl.staked,0),won:D.P.reduce((n,x)=>n+x.pl.won,0)},config:{enabled:true,minUsd:5,maxUsd:500,coinsPerUsd:100,feePct:0,github:false}}}
+ if(path.startsWith('/withdrawals/')&&opt.method==='POST'){const w=D.wd.find(x=>x.id===path.split('/')[2]);if(w&&w.status==='pending'){w.status=opt.body.action==='approve'?'approved':'rejected';w.decided_at=Date.now();w.admin_note=opt.body.note;w.txid=opt.body.txid||''}return{ok:true}}
+ if(path.startsWith('/withdrawals'))return D.wd.filter(w=>!path.includes('status=pending')||w.status==='pending'||false).filter(w=>!path.includes('status=approved')||w.status==='approved').filter(w=>!path.includes('status=rejected')||w.status==='rejected');
+ if(path.startsWith('/players/')&&!opt.method){const id=+path.split('/')[2].split('?')[0],x=D.P.find(q=>q.pl.tg_id===id),T=demoTotals(x);return{player:x.pl,totals:T.t,perGame:x.perGame,deposits:[...x.dep].sort((a,b)=>b.credited_at-a.credited_at),bonus:x.bonus,withdrawals:D.wd.filter(w=>w.tg_id===id),events:x.ev}}
+ if(path.startsWith('/players')){return D.P.map(x=>{const T=demoTotals(x),p=x.pl;return{tg_id:p.tg_id,name:p.name,username:p.username,first_seen:p.first_seen,last_seen:p.last_seen,balance:p.balance,level:p.level,rounds:p.rounds,staked:p.staked,won:p.won,pnl:p.won-p.staked,dep:T.dep,wd:T.paid,wd_pending:D.wd.filter(w=>w.tg_id===p.tg_id&&w.status==='pending').length}})}
+ if(path.startsWith('/deposits'))return D.P.flatMap(x=>x.dep.map(d=>({memo:d.memo,tg_id:x.pl.tg_id,name:x.pl.name,username:x.pl.username,asset:d.asset,amount:d.asset==='STARS'?d.stars+' Stars':d.usd.toFixed(2)+' USD',coins:d.coins,credited_at:d.credited_at}))).sort((a,b)=>b.credited_at-a.credited_at);
+ return{ok:true}}
+function verdict(t){const g=t.pnlPlayer,c=t.withdrawnCoins-t.depositedCoins,box=(title,n,sub)=>h('div',{class:'kpi',style:'flex:1;min-width:230px;border:1px solid '+(n>=0?'#2d6a4d':'#6b2d3a')},h('span',{},title),h('b',{style:'font-size:26px',class:n>=0?'pos':'neg'},(n>0?'+':'')+fm(n)+' ⭐'),h('span',{},sub));
+ return h('div',{class:'row',style:'margin:12px 0'},box('Итог по играм: игрок '+(g>=0?'в плюсе':'в минусе'),g,'выиграл '+fm(t.won)+' − поставил '+fm(t.staked)+' (данные клиента)'),
+  box('Итог по деньгам: игрок '+(c>=0?'в плюсе':'в минусе'),c,'выведено '+fm(t.withdrawnCoins)+' − внесено '+fm(t.depositedCoins)+(t.withdrawnPending?' · ещё ждёт вывода '+fm(t.withdrawnPending):'')+' (проверено сервером)'))}
+function paged(cols,rowsFn,total,step=100){let n=step;const box=h('div',{});const draw=()=>{box.replaceChildren(table(cols,rowsFn(n)),n<total?h('p',{},h('button',{onclick:()=>{n+=step;draw()}},'Показать ещё '+Math.min(step,total-n)+' из '+(total-n)),' ',h('button',{onclick:()=>{n=total;draw()}},'Показать все')):h('p',{class:'muted'},'Показано всё: '+total))};draw();return box}
+function histGames(d){const all=d.events.filter(e=>e.kind==='bet'||e.kind==='win'),games=[...new Set(all.map(e=>e.game))];
+ // накопленный итог считаем от старых событий к новым
+ const asc=[...all].reverse();let run=0;const cum=new Map();for(const e of asc){run+=e.kind==='win'?e.amount:-e.amount;cum.set(e,run)}
+ const holder=h('div',{});let gf='',kf='';
+ const draw=()=>{const rows=all.filter(e=>(!gf||e.game===gf)&&(!kf||e.kind===kf));
+  holder.replaceChildren(paged(['Время','Игра','Событие','Сумма','Итог игрока с начала, ⭐'],n=>rows.slice(0,n).map(e=>h('tr',{},h('td',{},dt(e.t)),h('td',{},e.game),h('td',{},e.kind==='bet'?'ставка':'выигрыш'),h('td',{class:e.kind==='win'?'pos':''},(e.kind==='win'?'+':'−')+fm(e.amount)),h('td',{},pn(cum.get(e))))),rows.length))};
+ const sg=h('select',{onchange:e=>{gf=e.target.value;draw()}},h('option',{value:''},'Все игры'),games.map(g=>h('option',{value:g},g)));
+ const sk=h('select',{onchange:e=>{kf=e.target.value;draw()}},h('option',{value:''},'Ставки и выигрыши'),h('option',{value:'bet'},'Только ставки'),h('option',{value:'win'},'Только выигрыши'));draw();
+ return h('div',{class:'card'},h('h3',{},'История всех игр ('+all.length+' событий)'),h('div',{class:'row'},sg,sk),holder)}
+function histBalance(d){const L=[];
+ for(const e of d.events){if(e.kind==='bet')L.push({t:e.t,what:'Ставка · '+e.game,delta:-e.amount});else if(e.kind==='win')L.push({t:e.t,what:'Выигрыш · '+e.game,delta:e.amount});else if(e.kind==='bal')L.push({t:e.t,what:'Снимок баланса от приложения',snap:e.amount})}
+ for(const x of d.deposits)L.push({t:x.credited_at,what:'Пополнение · '+x.asset,delta:x.coins,srv:1});
+ for(const x of d.bonus||[])L.push({t:x.credited_at,what:x.asset==='REF'?'Реферальный бонус':'Возврат монет по отклонённой заявке',delta:x.coins,srv:1});
+ for(const w of d.withdrawals){L.push({t:w.created_at,what:'Вывод · заявка '+(w.method==='STARS'?'Stars':w.method),delta:-w.coins,srv:1});if(w.status==='rejected')L.push({t:w.decided_at||w.created_at,what:'Вывод отклонён · возврат',delta:w.coins,srv:1})}
+ L.sort((a,b)=>b.t-a.t);
+ return h('div',{class:'card'},h('h3',{},'Полная история баланса ('+L.length+' записей)'),h('p',{class:'muted'},'Пополнения, выводы и возвраты записаны сервером. Ставки, выигрыши и снимки баланса присылает приложение. Строка «Снимок» показывает баланс, который игрок видел в этот момент.'),
+  paged(['Время','Что произошло','Изменение','Баланс по данным приложения'],n=>L.slice(0,n).map(r=>h('tr',{},h('td',{},dt(r.t)),h('td',{},r.what,r.srv?tag('сервер','approved'):null),h('td',{},r.delta==null?'':pn(r.delta)),h('td',{},r.snap==null?'':fm(r.snap)+' ⭐'))),L.length,150))}
+
+const C={good:'#59d49a',bad:'#ff8da1',info:'#7cb7ff',warn:'#f1d58a',vio:'#c4a3ff',grey:'#8fa396'};
+const NS='http://www.w3.org/2000/svg',sv=(t,a,...k)=>{const e=document.createElementNS(NS,t);for(const[x,y]of Object.entries(a||{}))e.setAttribute(x,y);for(const c of k.flat(Infinity))if(c!=null)e.append(c.nodeType?c:document.createTextNode(String(c)));return e};
+const sd=t=>new Date(t).toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'});
+function lineChart(title,pts,{color=C.good,zero=false,unit=' ⭐'}={}){const W=560,H=210,L=56,R=12,T=14,B=26;
+ const box=h('div',{class:'card'},h('h3',{style:'margin-top:0'},title));
+ if(pts.length<2){box.append(h('p',{class:'muted'},'Пока мало данных для графика.'));return box}
+ const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y);let x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys,zero?0:Infinity),y1=Math.max(...ys,zero?0:-Infinity);if(y0===y1){y0-=1;y1+=1}if(x0===x1)x1+=1;
+ const X=x=>L+(x-x0)/(x1-x0)*(W-L-R),Y=y=>T+(1-(y-y0)/(y1-y0))*(H-T-B);
+ const d=pts.map((p,i)=>(i?'L':'M')+X(p.x).toFixed(1)+' '+Y(p.y).toFixed(1)).join(' ');
+ const s=sv('svg',{viewBox:`0 0 ${W} ${H}`,class:'chart',role:'img','aria-label':title},
+  [y1,(y0+y1)/2,y0].map(v=>[sv('line',{x1:L,x2:W-R,y1:Y(v),y2:Y(v),class:'ax'}),sv('text',{x:L-6,y:Y(v)+4,'text-anchor':'end'},fm(Math.round(v)))]),
+  zero&&y0<0&&y1>0?sv('line',{x1:L,x2:W-R,y1:Y(0),y2:Y(0),stroke:C.grey,'stroke-dasharray':'4 4'}):null,
+  sv('path',{d,fill:'none',stroke:color,'stroke-width':2,'stroke-linejoin':'round'}),
+  sv('text',{x:L,y:H-6},sd(x0)),sv('text',{x:W-R,y:H-6,'text-anchor':'end'},sd(x1)));
+ box.append(s,h('p',{class:'muted',style:'margin:6px 0 0'},'Сейчас: '+fm(ys[ys.length-1])+unit));return box}
+function dayBars(title,evs){const W=560,H=210,L=56,R=12,T=14,B=26,DAY=864e5;const box=h('div',{class:'card'},h('h3',{style:'margin-top:0'},title));
+ const m=new Map();for(const e of evs){if(e.kind!=='bet'&&e.kind!=='win')continue;const k=Math.floor(e.t/DAY);const o=m.get(k)||{bet:0,win:0};o[e.kind]+=e.amount;m.set(k,o)}
+ const keys=[...m.keys()].sort((a,b)=>a-b).slice(-30);if(!keys.length){box.append(h('p',{class:'muted'},'Нет игр.'));return box}
+ const mx=Math.max(...keys.map(k=>Math.max(m.get(k).bet,m.get(k).win)))||1,bw=(W-L-R)/keys.length;
+ const s=sv('svg',{viewBox:`0 0 ${W} ${H}`,class:'chart',role:'img','aria-label':title},
+  [mx,mx/2,0].map(v=>[sv('line',{x1:L,x2:W-R,y1:T+(1-v/mx)*(H-T-B),y2:T+(1-v/mx)*(H-T-B),class:'ax'}),sv('text',{x:L-6,y:T+(1-v/mx)*(H-T-B)+4,'text-anchor':'end'},fm(Math.round(v)))]),
+  keys.map((k,i)=>{const o=m.get(k),x=L+i*bw,hh=v=>v/mx*(H-T-B);return[sv('rect',{x:x+bw*.1,y:H-B-hh(o.bet),width:bw*.38,height:hh(o.bet),fill:C.info,rx:2}),sv('rect',{x:x+bw*.5,y:H-B-hh(o.win),width:bw*.38,height:hh(o.win),fill:C.good,rx:2})]}),
+  sv('text',{x:L,y:H-6},sd(keys[0]*DAY)),sv('text',{x:W-R,y:H-6,'text-anchor':'end'},sd(keys[keys.length-1]*DAY)));
+ box.append(s,h('p',{class:'legend',style:'margin:6px 0 0'},h('span',{},h('i',{style:'background:'+C.info}),'поставлено'),h('span',{},h('i',{style:'background:'+C.good}),'выиграно'),h('span',{},'последние 30 дней с играми')));return box}
+function shareBars(title,rows,note){const tot=rows.reduce((n,r)=>n+r.v,0);const box=h('div',{class:'card'},h('h3',{style:'margin-top:0'},title));
+ if(!tot){box.append(h('p',{class:'muted'},'Пока нет данных.'));return box}
+ box.append(table(['Источник','Сумма','Доля',''],rows.filter(r=>r.v>0).sort((a,b)=>b.v-a.v).map(r=>h('tr',{},h('td',{},r.name,r.srv?tag('сервер','approved'):null),h('td',{},fm(r.v)+' ⭐'),h('td',{},(r.v/tot*100).toFixed(1)+'%'),h('td',{style:'width:36%'},h('div',{class:'bar'},h('i',{style:`width:${r.v/tot*100}%;background:${r.c}`})))))));
+ if(note)box.append(h('p',{class:'muted'},note));return box}
+function stats(d){const ev=d.events,sum=k=>ev.filter(e=>e.kind===k).reduce((n,e)=>n+e.amount,0),bn=a=>(d.bonus||[]).filter(x=>x.asset===a).reduce((n,x)=>n+x.coins,0),t=d.totals;
+ const inc=[{name:'Выигрыши в играх',v:sum('win'),c:C.good},{name:'Пополнения (реальные деньги)',v:t.depositedCoins,c:C.info,srv:1},{name:'Ежедневные бонусы',v:sum('bonus'),c:C.warn},{name:'Реферальные бонусы',v:bn('REF'),c:C.vio,srv:1},{name:'Продажа подарков',v:sum('sale'),c:'#ffb36b'},{name:'Возвраты по отклонённым выводам',v:bn('REFUND'),c:C.grey,srv:1}];
+ const ok=d.withdrawals.filter(w=>w.status!=='rejected').reduce((n,w)=>n+w.coins,0);
+ const out=[{name:'Ставки в играх',v:sum('bet'),c:C.bad},{name:'Выводы (принятые и ожидающие)',v:ok,c:C.warn,srv:1}];
+ const tot=inc.reduce((n,r)=>n+r.v,0),free=inc.filter(r=>['Ежедневные бонусы','Реферальные бонусы'].includes(r.name)).reduce((n,r)=>n+r.v,0);
+ const asc=[...ev].reverse(),cum=[];let run=0;for(const e of asc){if(e.kind==='bet'||e.kind==='win'){run+=e.kind==='win'?e.amount:-e.amount;cum.push({x:e.t,y:run})}}
+ const bal=asc.filter(e=>e.kind==='bal').map(e=>({x:e.t,y:e.amount}));
+ const cash=[];{const L=[...d.deposits.map(x=>({t:x.credited_at,v:-x.coins})),...d.withdrawals.filter(w=>w.status!=='rejected').map(w=>({t:w.created_at,v:w.coins}))].sort((a,b)=>a.t-b.t);let r=0;for(const e of L){r+=e.v;cash.push({x:e.t,y:r})}}
+ const pg=d.perGame,stk=pg.reduce((n,g)=>n+g.staked,0);
+ return h('div',{},
+  h('div',{class:'grid'},[['всего получено на баланс',fm(tot)+' ⭐'],['из них бонусы и рефералы',fm(free)+' ⭐ ('+(tot?(free/tot*100).toFixed(1):0)+'%)'],['бонусы за вход',fm(sum('bonus'))+' ⭐'],['рефералы',fm(bn('REF'))+' ⭐']].map(([l,v])=>h('div',{class:'kpi'},h('b',{},v),h('span',{},l)))),
+  h('div',{class:'cols',style:'margin-top:14px'},shareBars('Откуда пришли монеты (в % от всех поступлений)',inc,'Выигрыши, бонусы и продажи присылает приложение, остальное записал сервер.'),shareBars('Куда ушли монеты (в %)',out)),
+  h('div',{class:'cols'},lineChart('Баланс по снимкам приложения',bal,{color:C.info}),lineChart('Накопленный итог по играм (выиграл − поставил)',cum,{zero:true,color:cum.length&&cum[cum.length-1].y>=0?C.good:C.bad}),dayBars('Ставки и выигрыши по дням',ev),lineChart('Деньги: выведено − внесено (накопительно)',cash,{zero:true,color:C.warn})),
+  shareBars('Во что играет (доля ставок по играм, %)',pg.map((g,i)=>({name:g.game+' · итог игрока '+(g.won-g.staked>0?'+':'')+fm(g.won-g.staked),v:g.staked,c:[C.info,C.vio,C.warn,C.good,C.bad,'#ffb36b',C.grey][i%7]}))))}
+function viewDetail(d){const p=d.player,t=d.totals,tabs=[['sm','Итог для казино'],['ov','Обзор'],['pl','PnL'],['st','Статистика'],['gm','Игры'],['bl','Баланс'],['mn','Деньги'],['pf','Профиль']],cur=window.__ptab||'sm';
+ const k=(a,b)=>h('div',{class:'kpi'},h('b',{},a),h('span',{},b));
+ const note=h('input',{value:p.note||'',placeholder:'Заметка об игроке',style:'min-width:240px'});
+ const bodies={
+  ov:()=>h('div',{},verdict(t),h('div',{class:'grid'},k(fm(t.depositedCoins)+' ⭐','пополнено ('+t.depositedUsd+' USD, '+t.depositsCount+' раз)'),k(fm(t.withdrawnCoins)+' ⭐','выведено'+(t.withdrawnPending?' · ждёт '+fm(t.withdrawnPending):'')),k(fm(t.staked)+' ⭐','поставлено'),k(fm(t.won)+' ⭐','выиграно'),k(t.rtp==null?'—':t.rtp+'%','возврат (RTP)'),k(fm(t.rounds),'раундов'),k(fm(t.bigWin)+' ⭐','крупнейший выигрыш'),k(t.balanceReported==null?'—':fm(t.balanceReported)+' ⭐','баланс со слов клиента')),
+   h('p',{class:'muted'},t.verifiedNote),h('div',{class:'row'},note,h('button',{onclick:async()=>{await api('/players/'+p.tg_id,{method:'POST',body:{note:note.value}});alert('Сохранено')}},'Сохранить заметку'))),
+  sm:()=>simpleTab(d),
+  pl:()=>pnlTab(d),
+  st:()=>stats(d),
+  gm:()=>h('div',{},h('div',{class:'card'},h('h3',{style:'margin-top:0'},'По играм'),table(['Игра','Раундов','Поставлено','Доля ставок','Выиграно','Итог игрока','RTP'],d.perGame.map(g=>{const s=d.perGame.reduce((n,x)=>n+x.staked,0);return h('tr',{},h('td',{},g.game),h('td',{},fm(g.rounds)),h('td',{},fm(g.staked)),h('td',{},(s?g.staked/s*100:0).toFixed(1)+'%'),h('td',{},fm(g.won)),h('td',{},pn(g.won-g.staked)),h('td',{},g.staked?(g.won/g.staked*100).toFixed(1)+'%':'—'))}))),histGames(d)),
+  bl:()=>histBalance(d),
+  mn:()=>h('div',{},h('div',{class:'card'},h('h3',{style:'margin-top:0'},'Пополнения'),table(['Когда','Способ','Сумма','Монет'],d.deposits.map(x=>h('tr',{},h('td',{},dt(x.credited_at)),h('td',{},x.asset),h('td',{},x.asset==='STARS'?x.stars+' Stars':(x.usd??x.stars/100)+' USD'),h('td',{},fm(x.coins)))))),
+   h('div',{class:'card'},h('h3',{style:'margin-top:0'},'Бонусы и возвраты от сервера'),table(['Когда','Тип','Монет'],(d.bonus||[]).map(x=>h('tr',{},h('td',{},dt(x.credited_at)),h('td',{},x.asset==='REF'?'Реферальный бонус':'Возврат по отклонённому выводу'),h('td',{},fm(x.coins)))))),
+   h('div',{class:'card'},h('h3',{style:'margin-top:0'},'Выводы'),table(['Создана','Сумма','Куда','Статус'],d.withdrawals.map(w=>h('tr',{},h('td',{},dt(w.created_at)),h('td',{},fm(w.coins)+' ⭐'),h('td',{class:'mono'},w.method==='STARS'?'STARS → '+fm(w.stars)+' ★':w.method+' '+w.address),h('td',{},tag(ST[w.status],w.status)))))),
+   h('div',{class:'card'},h('h3',{style:'margin-top:0'},'Кошельки для вывода'),table(['Сеть','Адрес','Заявок'],Object.values(d.withdrawals.reduce((a,w)=>{const k=w.method+w.address;(a[k]=a[k]||{m:w.method,ad:w.address,n:0}).n++;return a},{})).map(x=>h('tr',{},h('td',{},x.m),h('td',{class:'mono'},x.ad),h('td',{},x.n)))))),
+  pf:()=>h('div',{},h('div',{class:'card'},h('h3',{style:'margin-top:0'},'Все данные профиля'),table(['Поле','Значение'],[['Telegram ID',p.tg_id],['Имя',p.name||'—'],['Username',p.username?'@'+p.username:'—'],['Первый вход',dt(p.first_seen)],['Последний вход',dt(p.last_seen)],['Уровень',p.level??'—'],['Баланс (со слов клиента)',p.balance==null?'—':fm(p.balance)+' ⭐'],['Раундов',fm(p.rounds)],['Поставлено',fm(p.staked)+' ⭐'],['Выиграно',fm(p.won)+' ⭐'],['Крупнейший выигрыш',fm(p.big_win)+' ⭐'],['Копия в GitHub',p.mirror_at?dt(p.mirror_at):'не записывалась'],['Заметка админа',p.note||'—']].map(r=>h('tr',{},h('td',{class:'muted'},r[0]),h('td',{class:'mono'},String(r[1])))))),
+   h('details',{class:'card'},h('summary',{},'Сырые данные (JSON)'),h('pre',{class:'mono',style:'white-space:pre-wrap'},JSON.stringify(d,null,2))))};
+ return h('div',{},h('div',{class:'row'},h('button',{onclick:()=>{DETAIL=null;render()}},'← К списку'),h('h2',{style:'margin:0'},who(p))),
+  h('p',{class:'muted'},'Первый вход: '+dt(p.first_seen)+' · последний: '+dt(p.last_seen)+' · уровень '+(p.level??'—')),
+  h('div',{class:'tabs'},tabs.map(([id,l])=>h('button',{class:cur===id?'on':'',onclick:()=>{window.__ptab=id;render()}},l))),bodies[cur]())}
+
+function diverge(title,rows,unit){const W=560,H=210,L=56,R=12,T=14,B=26;const box=h('div',{class:'card'},h('h3',{style:'margin-top:0'},title));
+ if(!rows.length){box.append(h('p',{class:'muted'},'Нет данных.'));return box}
+ const mx=Math.max(...rows.map(r=>Math.abs(r.v)))||1,y0=T+(H-T-B)/2,half=(H-T-B)/2,bw=(W-L-R)/rows.length;
+ const s=sv('svg',{viewBox:`0 0 ${W} ${H}`,class:'chart',role:'img','aria-label':title},
+  [mx,0,-mx].map(v=>[sv('line',{x1:L,x2:W-R,y1:y0-v/mx*half,y2:y0-v/mx*half,class:'ax'}),sv('text',{x:L-6,y:y0-v/mx*half+4,'text-anchor':'end'},fm(Math.round(v)))]),
+  rows.map((r,i)=>{const hh=Math.abs(r.v)/mx*half;return sv('rect',{x:L+i*bw+bw*.12,y:r.v>=0?y0-hh:y0,width:bw*.76,height:Math.max(1,hh),fill:r.v>=0?C.good:C.bad,rx:2})}),
+  sv('text',{x:L,y:H-6},rows[0].label),sv('text',{x:W-R,y:H-6,'text-anchor':'end'},rows[rows.length-1].label));
+ box.append(s,h('p',{class:'legend',style:'margin:6px 0 0'},h('span',{},h('i',{style:'background:'+C.good}),'игрок в плюсе'),h('span',{},h('i',{style:'background:'+C.bad}),'игрок в минусе'),unit?h('span',{},unit):null));return box}
+
+function casinoBlock(d){const dep=d.deposits.reduce((n,x)=>n+(x.coins||0),0),depUsd=d.deposits.reduce((n,x)=>n+(x.usd??x.stars/100),0),paid=d.withdrawals.filter(w=>w.status==='approved'),pend=d.withdrawals.filter(w=>w.status==='pending'),
+ paidC=paid.reduce((n,w)=>n+w.coins,0),paidUsd=paid.reduce((n,w)=>n+w.usd_cents/100,0),pendC=pend.reduce((n,w)=>n+w.coins,0),pendUsd=pend.reduce((n,w)=>n+w.usd_cents/100,0);
+ const bal=d.player.balance,cpu=window.__cpu||100,balAfter=bal==null?null:dep-paidC-pendC-bal,balUsd=bal==null?0:bal/cpu;const net=dep-paidC,netUsd=depUsd-paidUsd,worst=dep-paidC-pendC,worstUsd=depUsd-paidUsd-pendUsd,ratio=dep?paidC/dep*100:null,u=n=>(n>=0?'+':'−')+Math.abs(n).toFixed(2)+' USD',g=n=>(n>0?'+':n<0?'−':'')+fm(Math.abs(n))+' ⭐';
+ return h('div',{class:'card',style:'border:1px solid '+(net>=0?'#2d6a4d':'#6b2d3a')},h('h3',{style:'margin-top:0'},'Сколько казино заработало на этом игроке'),
+  h('p',{class:'muted',style:'margin-top:0'},'Считаются только реальные деньги: пополнения и принятые выводы. Рефералы, бонусы за вход, возвраты по отклонённым заявкам и игровые ставки не входят.'),
+  h('div',{class:'grid'},
+   h('div',{class:'kpi'},h('b',{},fm(dep)+' ⭐'),h('span',{},'пополнено · '+depUsd.toFixed(2)+' USD')),
+   h('div',{class:'kpi'},h('b',{},fm(paidC)+' ⭐'),h('span',{},'выплачено (принято) · '+paidUsd.toFixed(2)+' USD')),
+   h('div',{class:'kpi'},h('b',{},fm(pendC)+' ⭐'),h('span',{},'ждёт решения · '+pendUsd.toFixed(2)+' USD')),
+   h('div',{class:'kpi'},h('b',{class:net>=0?'pos':'neg',style:'font-size:24px'},g(net)),h('span',{},'казино '+(net>=0?'в плюсе':'в минусе')+' · '+u(netUsd))),
+   h('div',{class:'kpi'},h('b',{class:worst>=0?'pos':'neg'},g(worst)),h('span',{},'если принять все ожидающие · '+u(worstUsd))),
+   h('div',{class:'kpi'},h('b',{},ratio==null?'—':ratio.toFixed(1)+'%'),h('span',{},'выплачено от пополненного')),
+   h('div',{class:'kpi'},h('b',{},bal==null?'—':fm(bal)+' ⭐'),h('span',{},bal==null?'баланс игрока пока неизвестен':'текущий баланс игрока · ≈ '+balUsd.toFixed(2)+' USD (со слов приложения)')),
+   h('div',{class:'kpi'},h('b',{class:balAfter==null?'':balAfter>=0?'pos':'neg',style:'font-size:22px'},balAfter==null?'—':g(balAfter)),h('span',{},'казино, если игрок выведет весь баланс и все заявки'+(balAfter==null?'':' · '+u(balAfter/cpu))))),
+  dep?h('div',{style:'margin-top:10px'},h('div',{class:'bar',style:'height:14px'},h('i',{style:`width:${Math.min(100,paidC/dep*100)}%;background:${paidC>dep?C.bad:C.warn}`})),h('p',{class:'muted',style:'margin:4px 0 0'},'Заполнено = доля пополнений, которую игрок уже забрал выводами. Полная полоса значит, что казино вернуло всё внесённое.')):null)}
+
+const WAY={STARS:'Telegram Stars',TON:'TON',USDT_TON:'USDT (сеть TON)',USDT_TRC20:'USDT (сеть TRON)',SEND:'@send',WALLET:'@wallet',XROCKET:'@xRocket'};
+const way=a=>WAY[a]||a;
+function simpleTab(d){const cpu=window.__cpu||100,f=n=>fm(Math.round(n))+' ⭐',usd=n=>(n/cpu).toFixed(2)+' USD',sgn=n=>(n>0?'+':n<0?'−':'')+f(Math.abs(n));
+ const A=d.deposits.reduce((n,x)=>n+(x.coins||0),0),Ausd=d.deposits.reduce((n,x)=>n+(x.usd??x.stars/100),0);
+ const wd=d.withdrawals,paid=wd.filter(w=>w.status==='approved'),pend=wd.filter(w=>w.status==='pending'),rej=wd.filter(w=>w.status==='rejected');
+ const B=paid.reduce((n,w)=>n+w.coins,0),C=pend.reduce((n,w)=>n+w.coins,0),bal=d.player.balance,D=bal==null?0:bal;
+ const res=A-B-C-D,now=A-B,plus=res>=0;
+ const row=(sign,name,val,sub,cls)=>h('tr',{},h('td',{style:'width:34px;font-size:18px;font-weight:800'},sign),h('td',{},h('b',{},name),sub?h('div',{class:'muted'},sub):null),h('td',{style:'text-align:right;white-space:nowrap'},h('b',{class:cls||''},val)));
+ const bySrc=new Map();for(const x of d.deposits){const k=way(x.asset),o=bySrc.get(k)||{n:0,c:0};o.n++;o.c+=x.coins;bySrc.set(k,o)}
+ const stName={pending:'ждёт решения',approved:'выплачено',rejected:'отклонено, монеты вернулись игроку'};
+ return h('div',{},
+  h('div',{class:'card',style:`border:2px solid ${plus?'#2d6a4d':'#6b2d3a'};text-align:center`},
+   h('div',{class:'muted'},bal==null?'Баланс игрока пока неизвестен, расчёт без него':'Если игрок прямо сейчас заберёт всё, что у него есть'),
+   h('div',{style:'font-size:34px;font-weight:800;margin:6px 0',class:plus?'pos':'neg'},plus?'Казино в плюсе на '+f(Math.abs(res)):'Казино в минусе на '+f(Math.abs(res))),
+   h('div',{class:'muted'},'≈ '+usd(Math.abs(res))+(bal==null?'':' · баланс игрока учтён'))),
+  h('div',{class:'card'},h('h3',{style:'margin-top:0'},'Как это посчитано'),
+   table(['','Что',''],[row('','Игрок пополнил (всего)',f(A),Ausd.toFixed(2)+' USD реальных денег, '+d.deposits.length+' раз(а)'),
+    row('−','Уже выведено',f(B),paid.length+' заявок выплачено · '+usd(B)),
+    row('−','Ждёт вывода',f(C),pend.length+' заявок ещё не решено (монеты уже списаны с баланса)'),
+    row('−','Сейчас лежит на балансе',bal==null?'неизвестно':f(D),'сколько игрок ещё может вывести · данные приложения'),
+    row('=','Итог для казино',sgn(res),plus?'казино остаётся в плюсе':'казино вышло бы в минус',plus?'pos':'neg')])),
+  h('div',{class:'card'},h('p',{style:'margin:0'},h('b',{},'Проще говоря: '),'игрок внёс '+f(A)+', забрал '+f(B)+(C?', ещё хочет забрать '+f(C):'')+(bal==null?'':' и держит на балансе '+f(D))+'. '+(now>=0?'Прямо сейчас, без учёта баланса, казино заработало '+f(now)+'.':'Прямо сейчас, без учёта баланса, казино уже в минусе на '+f(-now)+'.')),
+   h('p',{class:'muted',style:'margin-bottom:0'},'В расчёте только реальные пополнения и выводы. Рефералы, бонусы за вход, продажа подарков, ставки и выигрыши в расчёт не входят: это монеты внутри игры. Отклонённые заявки тоже не считаются, монеты по ним вернулись игроку.')),
+  h('div',{class:'cols'},
+   h('div',{class:'card'},h('h3',{style:'margin-top:0'},'Откуда пополнения (по способам)'),
+    table(['Способ','Раз','Монет','Доля'],[...bySrc.entries()].sort((a,b)=>b[1].c-a[1].c).map(([k,o])=>h('tr',{},h('td',{},k),h('td',{},o.n),h('td',{},f(o.c)),h('td',{},(A?o.c/A*100:0).toFixed(0)+'%'))))),
+   h('div',{class:'card'},h('h3',{style:'margin-top:0'},'Куда выводил (по статусам)'),
+    table(['Статус','Заявок','Монет'],[['approved','Выплачено'],['pending','Ждёт решения'],['rejected','Отклонено']].map(([s,l])=>{const L=wd.filter(w=>w.status===s);return h('tr',{},h('td',{},tag(l,s)),h('td',{},L.length),h('td',{},f(L.reduce((n,w)=>n+w.coins,0))))})))),
+  h('div',{class:'card'},h('h3',{style:'margin-top:0'},'Все пополнения'),paged(['Когда','Способ','Сумма','Монет'],n=>d.deposits.slice(0,n).map(x=>h('tr',{},h('td',{},dt(x.credited_at)),h('td',{},way(x.asset)),h('td',{},x.asset==='STARS'?x.stars+' Stars':(x.usd??x.stars/100)+' USD'),h('td',{class:'pos'},'+'+fm(x.coins)))),d.deposits.length,50)),
+  h('div',{class:'card'},h('h3',{style:'margin-top:0'},'Все выводы'),paged(['Когда','Куда','Монет','Что получит','Статус'],n=>wd.slice(0,n).map(w=>h('tr',{},h('td',{},dt(w.created_at)),h('td',{class:'mono'},w.method==='STARS'?'Telegram Stars (на аккаунт '+w.tg_id+')':way(w.method)+' · '+w.address),h('td',{class:'neg'},'−'+fm(w.coins)),h('td',{},w.stars!=null?fm(w.stars)+' Stars':(w.usd_cents/100).toFixed(2)+' USD'),h('td',{},tag(stName[w.status],w.status)))),wd.length,50)))}
+function pnlTab(d){const DAY=864e5,t=d.totals,ev=d.events.filter(e=>e.kind==='bet'||e.kind==='win'),asc=[...ev].reverse();
+ const m=new Map();for(const e of asc){const k=Math.floor(e.t/DAY),o=m.get(k)||{day:k,rounds:0,staked:0,won:0};if(e.kind==='bet'){o.rounds++;o.staked+=e.amount}else o.won+=e.amount;m.set(k,o)}
+ const days=[...m.values()].sort((a,b)=>a.day-b.day);let c=0;for(const x of days){x.pnl=x.won-x.staked;c+=x.pnl;x.cum=c}
+ const bonus=d.events.filter(e=>e.kind==='bonus'||e.kind==='sale').reduce((n,e)=>n+e.amount,0),total=days.reduce((n,x)=>n+x.pnl,0);
+ const now=Date.now(),last=n=>days.filter(x=>x.day>=Math.floor((now-n*DAY)/DAY)).reduce((a,x)=>a+x.pnl,0),today=days.filter(x=>x.day===Math.floor(now/DAY)).reduce((a,x)=>a+x.pnl,0);
+ let peak=0,dd=0,run=0;for(const e of asc){run+=e.kind==='win'?e.amount:-e.amount;if(run>peak)peak=run;if(peak-run>dd)dd=peak-run}
+ let best=null,worst=null,sw=0,sl=0,mw=0,ml=0;for(const x of days){if(!best||x.pnl>best.pnl)best=x;if(!worst||x.pnl<worst.pnl)worst=x;if(x.pnl>0){sw++;sl=0}else if(x.pnl<0){sl++;sw=0}else{sw=0;sl=0}mw=Math.max(mw,sw);ml=Math.max(ml,sl)}
+ const plus=days.filter(x=>x.pnl>0).length,rounds=days.reduce((n,x)=>n+x.rounds,0),hr=Array.from({length:24},(_,i)=>({label:i+':00',v:0}));
+ for(const e of asc)hr[new Date(e.t).getHours()].v+=e.kind==='win'?e.amount:-e.amount;
+ const k=(a,b,cls)=>h('div',{class:'kpi'},h('b',{class:cls||''},a),h('span',{},b)),sg=n=>(n>0?'+':'')+fm(n)+' ⭐',cl=n=>n>=0?'pos':'neg';
+ const lbl=x=>x?sd(x.day*DAY)+' · '+sg(x.pnl):'—';
+ const pg=[...d.perGame].map(g=>({label:g.game,v:g.won-g.staked})).sort((a,b)=>b.v-a.v);
+ const cash=[];{const L=[...d.deposits.map(x=>({t:x.credited_at,v:-x.coins})),...d.withdrawals.filter(w=>w.status!=='rejected').map(w=>({t:w.created_at,v:w.coins}))].sort((a,b)=>a.t-b.t);let r=0;for(const e of L){r+=e.v;cash.push({x:e.t,y:r})}}
+ return h('div',{},verdict(t),casinoBlock(d),
+  h('div',{class:'grid'},k(sg(total),'PnL игрока за всё время',cl(total)),k(sg(total+bonus),'с учётом бонусов и продаж',cl(total+bonus)),k(sg(today),'сегодня',cl(today)),k(sg(last(7)),'за 7 дней',cl(last(7))),k(sg(last(30)),'за 30 дней',cl(last(30))),k(sg(rounds?Math.round(total/rounds):0),'в среднем за раунд',cl(total)),k(sg(Math.round(peak)),'пик PnL (лучший момент)',cl(peak)),k('−'+fm(Math.round(dd))+' ⭐','макс. просадка от пика','neg'),k(lbl(best),'лучший день',best?cl(best.pnl):''),k(lbl(worst),'худший день',worst?cl(worst.pnl):''),k(days.length?Math.round(plus/days.length*100)+'% ('+plus+' из '+days.length+')':'—','дней в плюсе'),k(mw+' / '+ml,'макс. серия дней в плюсе / в минусе')),
+  h('p',{class:'muted'},'PnL игрока = выиграл − поставил. Положительный PnL значит, что игрок забрал у казино больше, чем поставил. Данные приложения, их нельзя считать проверенными.'),
+  h('div',{class:'cols'},lineChart('PnL игрока нарастающим итогом',days.map(x=>({x:x.day*DAY,y:x.cum})),{zero:true,color:total>=0?C.good:C.bad}),diverge('PnL по дням',days.slice(-30).map(x=>({label:sd(x.day*DAY),v:x.pnl})),'последние 30 дней с играми'),diverge('PnL по играм',pg,'сумма за всё время'),diverge('PnL по часам суток (по времени браузера админа)',hr),lineChart('Деньги: выведено − внесено (накопительно)',cash,{zero:true,color:C.warn})),
+  h('div',{class:'card'},h('h3',{style:'margin-top:0'},'PnL по дням'),paged(['День','Раундов','Поставлено','Выиграно','PnL за день','PnL нарастающим итогом'],n=>[...days].reverse().slice(0,n).map(x=>h('tr',{},h('td',{},new Date(x.day*DAY).toLocaleDateString('ru-RU')),h('td',{},fm(x.rounds)),h('td',{},fm(x.staked)),h('td',{},fm(x.won)),h('td',{},pn(x.pnl)),h('td',{},pn(x.cum)))),days.length,60)))}
+function table(cols,rows){return h('div',{class:'wrap'},h('table',{},h('thead',{},h('tr',{},cols.map(c=>h('th',{},c)))),h('tbody',{},rows.length?rows:h('tr',{},h('td',{colspan:cols.length,class:'muted'},'Пусто')))))}
+const tag=(t,c)=>h('span',{class:'tag '+(c||'')},t);
+const pn=n=>h('span',{class:n>=0?'pos':'neg'},(n>0?'+':'')+fm(n));
+const link=(tg,label)=>h('a',{class:'l',onclick:()=>{DETAIL=tg;TAB='pl';render()}},label);
+async function render(){
+ const nav=$('#nav');nav.replaceChildren(...[['wd','Выводы'],['pl','Список игроков'],['dp','Пополнения'],['ov','Сводка']].map(([k,t])=>h('button',{class:TAB===k?'on':'',onclick:()=>{TAB=k;DETAIL=null;render()}},t)));
+ const v=$('#view');v.replaceChildren(h('p',{class:'muted'},'Загрузка…'));
+ try{v.replaceChildren(await ({wd:viewWd,pl:viewPl,dp:viewDp,ov:viewOv})[TAB]())}catch(e){if(e.status===403){out();$('#lerr').textContent='Неверный ключ'}else v.replaceChildren(h('p',{class:'neg'},'Ошибка: '+e.message))}}
+async function viewOv(){const o=await api('/overview'),w=o.withdrawals,d=o.deposits,p=o.players,k=(a,b)=>h('div',{class:'kpi'},h('b',{},a),h('span',{},b));
+ return h('div',{},h('div',{class:'grid'},k(w.pending||0,'заявок ждут решения ('+usd(w.pendingCents)+')'),k(usd(w.paidCents),'выплачено'),k(d.n,'пополнений'),k(fm(d.coins)+' ⭐','пополнено монет'),k(p.n,'игроков'),k(pn(p.won-p.staked),'чистый результат игроков, ⭐ (по данным клиента)')),
+ h('div',{class:'card',style:'margin-top:14px'},h('p',{},'Вывод: ',o.config.enabled?'включён':'выключен',' · от ',o.config.minUsd,' до ',o.config.maxUsd,' USD · ',o.config.coinsPerUsd,' ⭐ = 1 USD · комиссия ',o.config.feePct,'%'),
+ h('p',{},'Зеркало в GitHub: ',o.config.github?'настроено':'не настроено'),
+ !DEMO&&h('button',{onclick:async e=>{e.target.disabled=true;try{const r=await api('/mirror',{method:'POST'});e.target.textContent='Записано профилей: '+r.count}catch(x){e.target.textContent='Ошибка: '+x.message}}},'Записать профили в GitHub сейчас')))}
+async function viewWd(){const st=window.__wdst||'pending',rows=await api('/withdrawals?limit=200'+(st==='all'?'':'&status='+st));
+ const sw=h('div',{class:'row'},['pending','approved','rejected','all'].map(s=>h('button',{class:st===s?'on':'',onclick:()=>{window.__wdst=s;render()}},s==='all'?'Все':ST[s][0].toUpperCase()+ST[s].slice(1))));
+ const act=w=>{if(w.status!=='pending')return[tag(ST[w.status],w.status),w.admin_note?h('div',{class:'muted'},w.admin_note):null,w.txid?h('div',{class:'mono muted'},w.txid):null];
+  const note=h('input',{placeholder:'Комментарий / txid',style:'width:150px'});
+  const go=a=>async e=>{if(a==='approve'&&!confirm('Выплата сделана вручную? Заявка будет закрыта как принятая.'))return;if(a==='reject'&&!confirm('Отклонить заявку? Монеты вернутся игроку.'))return;e.target.disabled=true;
+   try{await api('/withdrawals/'+w.id,{method:'POST',body:{action:a,note:a==='reject'?note.value:note.value,txid:a==='approve'?note.value:''}});render()}catch(x){alert(x.message);render()}};
+  return[note,h('div',{class:'row',style:'margin:6px 0 0'},h('button',{class:'pri',onclick:go('approve')},'Принять'),h('button',{class:'bad',onclick:go('reject')},'Отклонить'))]};
+ const body=rows.map(w=>h('tr',{},h('td',{},dt(w.created_at)),h('td',{},link(w.tg_id,who(w))),h('td',{},fm(w.coins)+' ⭐',h('div',{class:w.stars!=null?'':'muted'},w.stars!=null?'→ '+fm(w.stars)+' Stars':usd(w.usd_cents))),h('td',{},w.method==='STARS'?'Telegram Stars':w.method,h('div',{class:'mono'},w.method==='STARS'?'Отправить '+fm(w.stars)+' Stars пользователю '+w.tg_id+(w.username?' (@'+w.username+')':''):w.address)),
+  h('td',{},(w.flags||'').split('; ').filter(Boolean).map(f=>tag(f,'flag'))),h('td',{},act(w))));
+ return h('div',{},sw,h('p',{class:'muted'},'Telegram не позволяет боту отправить Stars на аккаунт напрямую, поэтому заявки в Stars тоже оплачиваются вручную (например, подарком на нужное число звёзд). ',h('br'),'Выплату вы делаете вручную со своего кошелька на указанный адрес, затем нажимаете «Принять». «Отклонить» возвращает монеты игроку. Красные пометки: данные клиента не сходятся с проверенными пополнениями, проверьте историю игрока.'),h('div',{class:'card'},table(['Создана','Игрок','Сумма','Куда','Пометки','Решение'],body)))}
+async function viewPl(){
+ if(DETAIL){const d=await api('/players/'+DETAIL+'?full=1');try{window.__cpu=(await api('/overview')).config.coinsPerUsd}catch(e){}return viewDetail(d)}
+ const sort=window.__plsort||'last',q=window.__plq||'';
+ const rows=await api('/players?limit=200&sort='+sort+(q?'&q='+encodeURIComponent(q):''));
+ let tm;const inp=h('input',{placeholder:'Поиск по Telegram ID, имени или @username',value:q,style:'min-width:300px',oninput:e=>{clearTimeout(tm);const v=e.target.value;tm=setTimeout(()=>{window.__plq=v;window.__plfocus=1;render()},350)}});if(window.__plfocus){window.__plfocus=0;setTimeout(()=>{inp.focus();inp.setSelectionRange(q.length,q.length)},0)}
+ const sel=h('select',{onchange:e=>{window.__plsort=e.target.value;render()}},[['last','по активности'],['deposited','по пополнениям'],['staked','по ставкам'],['pnl','по PnL игрока'],['withdrawn','по выводам'],['balance','по балансу']].map(([v,t])=>h('option',{value:v,selected:v===sort},t)));
+ return h('div',{},h('div',{class:'row'},inp,sel,h('span',{class:'muted'},'Найдено: '+rows.length+(rows.length>=200?' (показаны первые 200)':''))),h('div',{class:'card'},table(['Игрок','Баланс','Пополнено','Выведено','Поставлено','PnL игрока','Раундов','Был'],rows.map(p=>h('tr',{},h('td',{},link(p.tg_id,who(p)),p.wd_pending?tag('заявка','pending'):null),h('td',{},p.balance==null?h('span',{class:'muted'},'—'):h('b',{},fm(p.balance)+' ⭐')),h('td',{},fm(p.dep)),h('td',{},fm(p.wd)),h('td',{},fm(p.staked)),h('td',{},pn(p.pnl)),h('td',{},fm(p.rounds)),h('td',{class:'muted'},dt(p.last_seen)))))))}
+async function viewDp(){const rows=await api('/deposits?limit=200');return h('div',{class:'card'},table(['Когда','Игрок','Способ','Сумма','Монет'],rows.map(d=>h('tr',{},h('td',{},dt(d.credited_at)),h('td',{},link(d.tg_id,who(d))),h('td',{},d.asset),h('td',{},d.amount),h('td',{},fm(d.coins))))))}
+function enter(){$('#login').classList.add('hide');$('#app').classList.remove('hide');$('#demoBar').classList.toggle('hide',!DEMO);render()}
+function out(){KEY='';sessionStorage.removeItem('qk');$('#app').classList.add('hide');$('#login').classList.remove('hide')}
+$('#go').onclick=async()=>{BASE=$('#base').value.trim().replace(/\/+$/,'');KEY=$('#key').value.trim();DEMO=false;$('#lerr').textContent='';
+ if(!/^https:\/\/[^/]+$/.test(BASE)&&!/^http:\/\/localhost(:\d+)?$/.test(BASE)){$('#lerr').textContent='Адрес должен начинаться с https://';return}
+ try{await api('/overview');sessionStorage.setItem('qk',KEY);sessionStorage.setItem('qb',BASE);enter()}catch(e){$('#lerr').textContent=e.status===403?'Неверный ключ':'Нет связи с сервером: '+e.message}};
+$('#demo').onclick=()=>{DEMO=true;enter()};$('#out').onclick=out;$('#refresh').onclick=render;
+$('#base').value=sessionStorage.getItem('qb')||localStorage.getItem('qb-last')||'';
+if(sessionStorage.getItem('qk')&&$('#base').value){KEY=sessionStorage.getItem('qk');BASE=$('#base').value;api('/overview').then(enter).catch(out)}
+$('#base').addEventListener('change',e=>localStorage.setItem('qb-last',e.target.value.trim()));
+</script></body></html>

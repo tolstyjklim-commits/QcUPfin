@@ -207,6 +207,7 @@ export type Save = {
   stats: Record<string, number>
   xp?: number                      // опыт для уровней
   ach?: Record<string, boolean>    // полученные достижения
+  seen?: Record<string, boolean>   // подарки, которые уже были у игрока (для коллекции)
 }
 
 // Демо-версия (сборка с VITE_DEMO=1): отдельное хранилище, стартовый баланс, никаких платежей. Реальная игра этого не касается.
@@ -259,9 +260,16 @@ export function loadSave(): Save {
   } catch { /* повреждённые данные — начинаем заново */ }
   return defaultSave()
 }
+// Метка времени последней записи: если то же приложение открыто в двух вкладках, вкладка со старым состоянием
+// не должна перезаписывать более свежее (так баланс мог «откатываться» или обнуляться).
+const STAMP = `${KEY}-ts`
+export const stampNow = () => { try { return Number(localStorage.getItem(STAMP)) || 0 } catch { return 0 } }
+let myStamp = 0
+export const savedElsewhere = () => stampNow() > myStamp // в хранилище лежит запись новее, чем у этой вкладки
 export const persist = (s: Save) => {
-  try { localStorage.setItem(KEY, JSON.stringify(s)) } catch { /* переполнено/запрещено */ }
+  try { myStamp = Date.now(); localStorage.setItem(KEY, JSON.stringify(s)); localStorage.setItem(STAMP, String(myStamp)) } catch { /* переполнено/запрещено */ }
 }
+export const markLoaded = () => { myStamp = stampNow() }
 
 // Небольшое случайное блуждание цен вокруг базовой (коридор 70–140%).
 export function walkPrices(p: Record<GiftKind, number>): Record<GiftKind, number> {
@@ -276,10 +284,12 @@ export function walkPrices(p: Record<GiftKind, number>): Record<GiftKind, number
 }
 
 // ---- Платёжная математика (RTP указан в комментариях) ----
-// Краш: точка вылета с «налогом» 15% (RTP 85% при любом авто-выводе)
+// Краш: RTP 85% при выводе от ×1,5 и плавно до 92% у ×1,0 (самый ранний вылет — ×1,01, таких 8%).
+// Шанс долететь до m: P(m) = RTP(m)/m, RTP(m) = 0,85 + 0,07·clamp((1,5−m)/0,5). Всегда < 100%, обыграть нельзя.
 export const crashPoint = () => {
-  const r = rnd()
-  return Math.min(1000, Math.max(1, Math.floor(85 / (1 - r)) / 100))
+  const u = 1 - rnd()
+  const m = u > 0.92 ? 1.01 : u > 0.5667 ? 1.06 / (u + 0.14) : 0.85 / u
+  return Math.min(1000, Math.max(1.01, Math.floor(m * 100) / 100))
 }
 export const SYMBOLS = ['💎', '7⭐', '🍀', '🔔', '🍇', '🍋', '⭐', '💰']
 export const SYMBOL_WEIGHTS = [1, 1, 3, 4, 6, 8, 12, 20]

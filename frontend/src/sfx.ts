@@ -61,3 +61,19 @@ export const play = {
   spin: () => { tone(260, 0.5, 'sawtooth', 0.025, 700); noise(0.4, 0.04, 0, 1800, 'bandpass') },
   step: () => { tone(180, 0.07, 'square', 0.04, 120); noise(0.05, 0.05, 0, 700) },
 }
+
+// ---- вибрация (Telegram Haptic Feedback): привязана к тем же событиям, что и звуки ----
+export const haptic = { on: (() => { try { return localStorage.getItem('qcup-haptic') !== '0' } catch { return true } })() }
+export const setHaptic = (v: boolean) => { haptic.on = v; try { localStorage.setItem('qcup-haptic', v ? '1' : '0') } catch { /* хранилище недоступно */ } }
+let lastBuzz = 0
+const buzz = (k: string) => {
+  const HF = (window as any).Telegram?.WebApp?.HapticFeedback
+  if (!haptic.on || !HF) return
+  const t = Date.now(); if (t - lastBuzz < 70) return; lastBuzz = t
+  try { if (k === 'success' || k === 'error' || k === 'warning') HF.notificationOccurred(k); else HF.impactOccurred(k) } catch { /* не Telegram */ }
+}
+const HMAP: Record<string, string> = { click: 'light', stop: 'light', flip: 'light', card: 'light', lock: 'rigid', coin: 'soft', thud: 'medium', zap: 'medium', boom: 'heavy', lose: 'error', win: 'success', big: 'success', jackpot: 'success', cash: 'success', chime: 'success', sparkle: 'light', bounce: 'light' }
+for (const k of Object.keys(HMAP)) {
+  const f = (play as any)[k]; if (typeof f !== 'function') continue
+  ;(play as any)[k] = (...a: unknown[]) => { buzz(HMAP[k]); return f(...a) }
+}

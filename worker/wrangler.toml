@@ -17,3 +17,25 @@ MIN_STARS = "10"
 MAX_STARS = "100000"
 COINS_PER_STAR = "1"
 TTL_MIN = "60"
+
+# Пополнение через @send, @wallet, @xRocket (ключи задаются секретами SEND_TOKEN, WALLET_API_KEY, XROCKET_TOKEN, см. README)
+COINS_PER_USD = "100"
+MIN_USD = "1"
+MAX_USD = "5000"
+
+# Вывод средств (тестовый режим: заявки вручную принимает администратор в panel.html)
+WITHDRAW_ENABLED = "1"          # "0" = выключить вывод
+WITHDRAW_MIN_USD = "5"
+WITHDRAW_MAX_USD = "500"
+WITHDRAW_COINS_PER_USD = "100"  # сколько ⭐ за 1 USD при выводе
+WITHDRAW_FEE_PERCENT = "0"
+WITHDRAW_COINS_PER_STAR = "1"  # сколько ⭐ за 1 Telegram Star при выводе
+WITHDRAW_MIN_STARS = "100"       # минимум вывода в Telegram Stars
+
+# Зеркало данных игроков в приватный репозиторий GitHub (секрет GITHUB_TOKEN, см. README)
+DATA_REPO = ""                  # например ваш-логин/qcup-data
+DATA_BRANCH = "main"
+
+# Откуда открывается админ-панель (отдельно от сайта игры), несколько через запятую.
+# "null" = файл panel.html, открытый двойным кликом. Для панели на GitHub Pages: https://ваш-логин.github.io (без пути).
+ADMIN_ORIGIN = ""

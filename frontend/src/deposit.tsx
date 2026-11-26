@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Copy, ExternalLink, Star, X } from 'lucide-react'
+import { Copy, ExternalLink, Rocket, Send, Star, Wallet, X } from 'lucide-react'
 import { DEMO, money } from './lib'
 import { TonIcon, UsdtIcon } from './art'
 
@@ -18,9 +18,12 @@ let LOCAL = API === undefined
 // Включается, когда в config.json одновременно заданы apiUrl и адрес кошелька (tonAddress / trc20Address).
 let HYBRID = false
 
-export type Method = 'TON' | 'USDT_TON' | 'USDT_TRC20' | 'STARS'
-export const METHOD_LABEL: Record<Method, string> = { TON: 'TON', USDT_TON: 'USDT (сеть TON)', USDT_TRC20: 'USDT (сеть TRON, TRC20)', STARS: 'Telegram Stars' }
-const ALL_METHODS: Method[] = ['TON', 'USDT_TON', 'USDT_TRC20', 'STARS']
+export type Method = 'TON' | 'USDT_TON' | 'USDT_TRC20' | 'STARS' | 'SEND' | 'WALLET' | 'XROCKET'
+export const METHOD_LABEL: Record<Method, string> = { TON: 'TON', USDT_TON: 'USDT (сеть TON)', USDT_TRC20: 'USDT (сеть TRON, TRC20)', STARS: 'Telegram Stars', SEND: 'Send', WALLET: 'Wallet', XROCKET: 'xRocket' }
+const ALL_METHODS: Method[] = ['TON', 'USDT_TON', 'USDT_TRC20', 'STARS', 'SEND', 'WALLET', 'XROCKET']
+// Кассы Telegram (@send, @wallet, @xRocket): счёт создаёт и проверяет сервер, платят в долларах (USD), нужен сервер (Worker/VPS) с ключами касс
+const PROVIDERS: Method[] = ['SEND', 'WALLET', 'XROCKET']
+const isProvider = (m: Method) => PROVIDERS.includes(m)
 // ТЕСТ: пока нет сервера, «Telegram Stars» видны всем и зачисляются без реальной оплаты. Перед запуском для реальных денег поставить false:
 // тогда без сервера способ снова виден только владельцу в демо-режиме, а реальные Stars включатся сами при работе с сервером (VITE_API_URL).
 const TEST_STARS_FOR_ALL = true
@@ -36,7 +39,7 @@ type SiteCfg = {
 const defaults = (): SiteCfg => ({
   tonAddress: env.VITE_TON_ADDRESS || '', trc20Address: env.VITE_TRC20_ADDRESS || '',
   toncenterKey: env.VITE_TONCENTER_KEY || '', tronKey: env.VITE_TRONGRID_KEY || '',
-  methods: { TON: true, USDT_TON: true, USDT_TRC20: true, STARS: true },
+  methods: { TON: true, USDT_TON: true, USDT_TRC20: true, STARS: true, SEND: true, WALLET: true, XROCKET: true },
   min: { ton: 0.1, usdt: 1, stars: 10 }, max: { ton: 1_000_000, usdt: 10_000_000, stars: 10_000_000 }, ttlMin: 60,
   starUsd: Number(env.VITE_STAR_USD || 0.015), tonUsd: Number(env.VITE_TON_USD || 0), demoHash: '', apiUrl: '',
 })
@@ -206,7 +209,11 @@ async function checkOnce(): Promise<Credit[]> {
 // Фоновая проверка платежей. Без сервера: браузер сам ищет платёж в блокчейне. С сервером: забираем у сервера зачисленные платежи (claim), один раз.
 export function useLocalDeposits(onCredit: (coins: number, asset: string) => void) {
   useEffect(() => {
-    if (DEMO) return // в демо-версии платежи не проверяются
+    if (DEMO) { // в демо-версии настоящие платежи не проверяются, но тестовый платёж через кассы зачисляется сразу
+      const h = (e: Event) => { const d = (e as CustomEvent).detail; onCredit(d.coins, d.label) }
+      window.addEventListener('qcup-demo-credit', h)
+      return () => window.removeEventListener('qcup-demo-credit', h)
+    }
     let dead = false, busy = false, t = 0
     const tick = async () => {
       if (busy || dead) return
@@ -224,7 +231,7 @@ export function useLocalDeposits(onCredit: (coins: number, asset: string) => voi
           if (rows.length) {
             const c = await fetch(`${API}/api/deposit/claim`, { method: 'POST', headers: hdr(), body: JSON.stringify({ ids: rows.map(x => x.id) }) })
             const coins = c.ok ? Number(((await c.json()) as { coins: string }).coins) : 0
-            if (coins > 0) { payLog('claimed', { ids: rows.map(x => x.id), coins }); onCredit(coins, rows[0].asset === 'STARS' ? METHOD_LABEL.STARS : rows[0].asset) }
+            if (coins > 0) { payLog('claimed', { ids: rows.map(x => x.id), coins }); onCredit(coins, rows[0].asset === 'REF' ? 'Реферальный бонус' : rows[0].asset === 'REFUND' ? 'Возврат вывода' : METHOD_LABEL[rows[0].asset as Method] || rows[0].asset) }
           }
         }
       } catch (e) { payLog('poll_error', { what: LOCAL ? 'local' : 'claim', error: String((e as Error)?.message || e) }) } finally { busy = false }
@@ -251,9 +258,15 @@ async function testStars(memo: string, coins: number) {
 const initData = () => (window as any).Telegram?.WebApp?.initData || ''
 const hdr = () => ({ 'content-type': 'application/json', 'x-telegram-init-data': initData() })
 
-type Cfg = { localCrypto?: boolean; tonAddress: string; trc20Address: string; methods: Record<Method, boolean>; ttlMin: number; min: { ton: number; usdt: number; stars: number }; max: { ton: number; usdt: number; stars: number }; rate: { ton: number; usdt: number; stars: number } }
+type Cfg = { localCrypto?: boolean; tonAddress: string; trc20Address: string; methods: Record<Method, boolean>; ttlMin: number; min: { ton: number; usdt: number; stars: number; usd: number }; max: { ton: number; usdt: number; stars: number; usd: number }; rate: { ton: number; usdt: number; stars: number; usd: number } }
 type Intent = { memo: string; method: Method; address: string; amount: string; sender?: string; jettonMaster?: string | null; invoice?: string }
 
+const startAmount = (m: Method) => (m === 'TON' ? '1' : m === 'STARS' ? '100' : isProvider(m) ? '5' : '10')
+const PROV_INFO: Record<string, { name: string; sub: string; btn: string }> = {
+  SEND: { name: 'Send', sub: '@send · криптовалюта', btn: 'Оплатить в @send' },
+  WALLET: { name: 'Wallet', sub: '@wallet · TON, USDT, BTC', btn: 'Оплатить в @wallet' },
+  XROCKET: { name: 'xRocket', sub: '@xRocket · криптовалюта', btn: 'Оплатить в @xRocket' },
+}
 export function DepositModal({ onClose, onNotice }: { onClose: () => void; onNotice: (s: string) => void }) {
   const [cfg, setCfg] = useState<Cfg | null>(null)
   const [err, setErr] = useState('')
@@ -263,7 +276,7 @@ export function DepositModal({ onClose, onNotice }: { onClose: () => void; onNot
   const [intent, setIntent] = useState<Intent | null>(null)
   const [status, setStatus] = useState<'pending' | 'credited' | 'expired'>('pending')
   const timer = useRef(0)
-  const localFlow = (m: Method) => LOCAL || (m !== 'STARS' && !!cfg?.localCrypto) // способ проверяет сам сайт, а не сервер
+  const localFlow = (m: Method) => LOCAL || (m !== 'STARS' && !isProvider(m) && !!cfg?.localCrypto) // способ проверяет сам сайт, а не сервер
 
   useEffect(() => {
     let t = 0, dead = false
@@ -274,13 +287,14 @@ export function DepositModal({ onClose, onNotice }: { onClose: () => void; onNot
           const st = j.stars || {}
           const lc = !j.address && HYBRID // сервер без TON: крипту принимает сам сайт, адреса из config.json
           const lr = lc ? await liveRates() : null
-          const methods = { TON: !!j.address || (lc && c.methods.TON && !!c.tonAddress), USDT_TON: !!j.address || (lc && c.methods.USDT_TON && !!c.tonAddress), USDT_TRC20: lc && c.methods.USDT_TRC20 && !!c.trc20Address, STARS: !!st.enabled }
+          const methods = { TON: !!j.address || (lc && c.methods.TON && !!c.tonAddress), USDT_TON: !!j.address || (lc && c.methods.USDT_TON && !!c.tonAddress), USDT_TRC20: lc && c.methods.USDT_TRC20 && !!c.trc20Address, STARS: !!st.enabled, SEND: !!j.crypto?.SEND && c.methods.SEND, WALLET: !!j.crypto?.WALLET && c.methods.WALLET, XROCKET: !!j.crypto?.XROCKET && c.methods.XROCKET }
+          const cr = j.crypto || {}
           const first = ALL_METHODS.find(m => methods[m])
-          if (first) { setMethod(first); setAmount(first === 'TON' ? '1' : first === 'STARS' ? '100' : '10') }
+          if (first) { setMethod(first); setAmount(startAmount(first)) }
           setCfg({
             localCrypto: lc, tonAddress: lc ? c.tonAddress : j.address || '', trc20Address: lc ? c.trc20Address : '', methods, ttlMin: lc ? c.ttlMin : j.ttlMin,
-            min: { ton: lc ? c.min.ton : j.minTon, usdt: lc ? c.min.usdt : j.usdt?.min ?? 1, stars: st.min ?? 10 }, max: { ton: lc ? c.max.ton : j.maxTon, usdt: lc ? c.max.usdt : j.usdt?.max ?? 10_000_000, stars: st.max ?? 10_000_000 },
-            rate: { ton: lr ? lr.ton : j.coinsPerTon, usdt: lr ? lr.usdt : j.usdt?.coinsPerUsdt ?? 100, stars: st.coinsPerStar ?? 1 },
+            min: { ton: lc ? c.min.ton : j.minTon, usdt: lc ? c.min.usdt : j.usdt?.min ?? 1, stars: st.min ?? 10, usd: cr.minUsd ?? 1 }, max: { ton: lc ? c.max.ton : j.maxTon, usdt: lc ? c.max.usdt : j.usdt?.max ?? 10_000_000, stars: st.max ?? 10_000_000, usd: cr.maxUsd ?? 5000 },
+            rate: { ton: lr ? lr.ton : j.coinsPerTon, usdt: lr ? lr.usdt : j.usdt?.coinsPerUsdt ?? 100, stars: st.coinsPerStar ?? 1, usd: cr.coinsPerUsd ?? 100 },
           })
         }).catch(() => setErr('Пополнение сейчас недоступно.'))
         return
@@ -288,11 +302,11 @@ export function DepositModal({ onClose, onNotice }: { onClose: () => void; onNot
         // Реальные Stars без сервера не принять (нужен токен бота), поэтому игрокам способ скрыт; владельцу в демо-режиме виден тестовый
         const demo = TEST_STARS_FOR_ALL || (await ownerDemoUnlocked())
         if (dead) return
-        if (!c.tonAddress && !c.trc20Address && !demo) return setErr('Пополнение не настроено: задайте адреса кошельков в админ-панели (admin.html).')
-        const methods = { TON: c.methods.TON && !!c.tonAddress, USDT_TON: c.methods.USDT_TON && !!c.tonAddress, USDT_TRC20: c.methods.USDT_TRC20 && !!c.trc20Address, STARS: TEST_STARS_FOR_ALL || (demo && c.methods.STARS) }
+        if (!c.tonAddress && !c.trc20Address && !demo && !DEMO) return setErr('Пополнение не настроено: задайте адреса кошельков в админ-панели (admin.html).')
+        const methods = { TON: c.methods.TON && (!!c.tonAddress || DEMO), USDT_TON: c.methods.USDT_TON && (!!c.tonAddress || DEMO), USDT_TRC20: c.methods.USDT_TRC20 && (!!c.trc20Address || DEMO), STARS: TEST_STARS_FOR_ALL || (demo && c.methods.STARS), SEND: TEST_STARS_FOR_ALL && c.methods.SEND, WALLET: TEST_STARS_FOR_ALL && c.methods.WALLET, XROCKET: TEST_STARS_FOR_ALL && c.methods.XROCKET }
         const first = ALL_METHODS.find(m => methods[m])
-        if (first) { setMethod(first); setAmount(first === 'TON' ? '1' : '10') }
-        const refresh = () => liveRates().then(r => setCfg({ tonAddress: c.tonAddress, trc20Address: c.trc20Address, methods, ttlMin: c.ttlMin, min: c.min, max: c.max, rate: { ton: r.ton, usdt: r.usdt, stars: 1 } }))
+        if (first) { setMethod(first); setAmount(startAmount(first)) }
+        const refresh = () => liveRates().then(r => setCfg({ tonAddress: c.tonAddress, trc20Address: c.trc20Address, methods, ttlMin: c.ttlMin, min: { ...c.min, usd: 1 }, max: { ...c.max, usd: 5000 }, rate: { ton: r.ton, usdt: r.usdt, stars: 1, usd: 100 } }))
         refresh()
         t = window.setInterval(refresh, 60_000) // курс обновляется, пока открыто окно
     })
@@ -325,12 +339,13 @@ export function DepositModal({ onClose, onNotice }: { onClose: () => void; onNot
   }, [intent, status, onNotice])
 
   const isStars = method === 'STARS'
+  const isProv = isProvider(method)
   const isUsdt = method === 'USDT_TON' || method === 'USDT_TRC20'
   const num = Number(amount.replace(',', '.')) || 0
-  const k = isStars ? 'stars' : isUsdt ? 'usdt' : 'ton'
+  const k = isStars ? 'stars' : isProv ? 'usd' : isUsdt ? 'usdt' : 'ton'
   const lim = cfg ? { min: cfg.min[k], max: cfg.max[k], rate: cfg.rate[k] } : null
-  const unit = isStars ? 'Stars' : isUsdt ? 'USDT' : 'TON'
-  const amountOk = !!lim && num >= lim.min && num <= lim.max && (!isStars || Number.isInteger(num))
+  const unit = isStars ? 'Stars' : isProv ? 'USD' : isUsdt ? 'USDT' : 'TON'
+  const amountOk = !!lim && num >= lim.min && num <= lim.max && (!isStars || Number.isInteger(num)) && (!isProv || Math.abs(Math.round(num * 100) - num * 100) < 1e-6)
   const senderOk = !isUsdt || (method === 'USDT_TRC20' ? isTronAddr(sender) : isTonAddr(sender))
 
   // Счёт Telegram Stars открывается внутри Telegram. «Оплачено» от Telegram только подсказка для интерфейса:
@@ -345,9 +360,41 @@ export function DepositModal({ onClose, onNotice }: { onClose: () => void; onNot
     else window.open(url, '_blank')
   }
 
+  // ссылка на оплату в @send, @wallet или @xRocket: открывается внутри Telegram. Принимаем только адреса t.me, иное считаем ошибкой сервера
+  const openPay = (url: string) => {
+    if (!/^https:\/\/t\.me\//.test(url)) return setErr('Сервер вернул неожиданную ссылку на оплату. Платёж отменён.')
+    const tg = (window as any).Telegram?.WebApp
+    if (tg?.openTelegramLink) tg.openTelegramLink(url)
+    else window.open(url, '_blank')
+  }
+
   const create = async () => {
     setErr('')
     if (!cfg || !lim) return
+    // в демо-версии кошельков нет: TON и USDT тоже работают как тест
+    const demoNoWallet = DEMO && !isProv && !isStars && !(method === 'USDT_TRC20' ? cfg.trc20Address : cfg.tonAddress)
+    if ((isProv && LOCAL) || demoNoWallet) { // тест без сервера: деньги не списываются, ⭐ зачисляются через пару секунд (убрать вместе с TEST_STARS_FOR_ALL)
+      const memo = 'qc-test-' + [...crypto.getRandomValues(new Uint8Array(6))].map(b => (b % 36).toString(36)).join('')
+      const coins = Math.floor(num * (isProv ? cfg.rate.usd : lim.rate))
+      setIntent({ memo, method, address: '', amount: String(num) }); setStatus('pending')
+      window.setTimeout(() => {
+        if (DEMO) window.dispatchEvent(new CustomEvent('qcup-demo-credit', { detail: { coins, label: METHOD_LABEL[method] } }))
+        else testStars(memo, coins)
+        setStatus('credited'); onNotice(`Пополнено: +${money(coins)} ⭐`)
+      }, 2200)
+      return
+    }
+    if (isProv) {
+      try {
+        const r = await fetch(`${API}/api/deposit/crypto`, { method: 'POST', headers: hdr(), body: JSON.stringify({ provider: method, usd: Math.round(num * 100) / 100 }) })
+        const j = await r.json()
+        if (r.status === 401) return setErr('Войдите через Telegram, чтобы пополнить баланс.')
+        if (!r.ok) return setErr(j.error || 'Не удалось создать счёт')
+        setIntent({ memo: j.memo, method, address: '', amount: String(j.usd), invoice: j.payUrl }); setStatus('pending')
+        openPay(j.payUrl)
+      } catch { setErr('Нет связи с сервером') }
+      return
+    }
     if (isStars) {
       if (LOCAL) {
         if (!TEST_STARS_FOR_ALL && !(await ownerDemoUnlocked())) return setErr('Оплата Stars работает только с сервером.')
@@ -411,25 +458,32 @@ export function DepositModal({ onClose, onNotice }: { onClose: () => void; onNot
         <div className="dep-methods" role="radiogroup" aria-label="Валюта">
           {available.map(m => (
             <button key={m} type="button" role="radio" aria-checked={method === m} className={`dep-method ${method === m ? 'on' : ''}`}
-              onClick={() => { setMethod(m); setAmount(m === 'TON' ? '1' : m === 'STARS' ? '100' : '10'); setErr('') }}>
-              {m === 'TON' ? <TonIcon size={26} /> : m === 'STARS' ? <Star size={26} fill="currentColor" /> : <UsdtIcon size={26} />}
-              <span><b>{m === 'TON' ? 'TON' : m === 'STARS' ? 'Telegram Stars' : 'USDT'}</b><small>{m === 'TON' ? 'сеть TON' : m === 'USDT_TON' ? 'сеть TON' : m === 'STARS' ? 'оплата внутри Telegram' : 'сеть TRON · TRC20'}</small></span>
+              onClick={() => { setMethod(m); setAmount(startAmount(m)); setErr('') }}>
+              {m === 'TON' ? <TonIcon size={26} /> : m === 'STARS' ? <Star size={26} fill="currentColor" /> : m === 'SEND' ? <Send size={24} /> : m === 'WALLET' ? <Wallet size={24} /> : m === 'XROCKET' ? <Rocket size={24} /> : <UsdtIcon size={26} />}
+              <span><b>{m === 'TON' ? 'TON' : m === 'STARS' ? 'Telegram Stars' : PROV_INFO[m] ? PROV_INFO[m].name : 'USDT'}</b><small>{m === 'TON' ? 'сеть TON' : m === 'USDT_TON' ? 'сеть TON' : m === 'STARS' ? 'оплата внутри Telegram' : PROV_INFO[m] ? PROV_INFO[m].sub : 'сеть TRON · TRC20'}</small></span>
               {method === m && <em>✓</em>}
             </button>))}
         </div>
         <label className="dep-lab">Сумма, {unit}</label>
         <input className="dep-input" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} />
-        <div className="dep-quick">{(isStars ? [50, 100, 500, 1000] : isUsdt ? [5, 10, 50, 100] : [0.5, 1, 5, 10]).map(v => <button key={v} onClick={() => setAmount(String(v))}>{v}</button>)}</div>
-        {isUsdt && localFlow(method) && <>
+        <div className="dep-quick">{(isStars ? [50, 100, 500, 1000] : isProv ? [5, 10, 25, 100] : isUsdt ? [5, 10, 50, 100] : [0.5, 1, 5, 10]).map(v => <button key={v} onClick={() => setAmount(String(v))}>{v}</button>)}</div>
+        {isUsdt && localFlow(method) && !(DEMO && !(method === 'USDT_TRC20' ? cfg.trc20Address : cfg.tonAddress)) && <>
           <label className="dep-lab">Адрес вашего кошелька, с которого платите ({method === 'USDT_TRC20' ? 'TRON' : 'TON'})</label>
           <input className="dep-input dep-mono" placeholder={method === 'USDT_TRC20' ? 'T…' : 'UQ… / EQ…'} value={sender} onChange={e => setSender(e.target.value)} />
           <p className="dep-hint">Платёж привязывается к вам по этому адресу и точной сумме. С чужого адреса он не засчитается.</p>
         </>}
         {isStars && LOCAL && <p className="dep-hint">Тестовый режим: Stars не списываются, звёзды зачисляются сразу. Для реальной оплаты нужен сервер.</p>}
-        <p className="dep-hint">≈ {money(num * lim!.rate)} ⭐ · 1 {unit} ≈ {lim!.rate} ⭐ (курс по рынку, обновляется) · от {lim!.min} до {lim!.max} {unit}</p>
+        <p className="dep-hint">≈ {money(num * lim!.rate)} ⭐ · 1 {unit} {isProv ? '=' : '≈'} {lim!.rate} ⭐ ({isProv ? 'курс фиксированный' : 'курс по рынку, обновляется'}) · от {lim!.min} до {lim!.max} {unit}</p>
         <button className="primary-btn wide" onClick={create} disabled={!amountOk || !available.length}>Продолжить</button>
       </>}
       {cfg && intent && <>
+        {status === 'pending' && isProvider(intent.method) && <>
+          <p className="dep-hint">Счёт на <b>{intent.amount} USD</b> {intent.invoice ? <>создан в {PROV_INFO[intent.method].sub.split(' ·')[0]}. Оплатите его там, звёзды в игре появятся сразу после подтверждения. Счёт действует {cfg.ttlMin} мин.</> : <>({PROV_INFO[intent.method].sub.split(' ·')[0]}).</>}</p>
+          {intent.invoice
+            ? <><button className="primary-btn wide dep-open" onClick={() => openPay(intent.invoice!)}><ExternalLink size={16} /> {PROV_INFO[intent.method].btn}</button>
+              <p className="dep-hint">Ждём подтверждение, окно обновится само. Если закрыть окно, звёзды всё равно придут после оплаты.</p></>
+            : <p className="dep-hint">Тестовый режим: деньги не списываются, звёзды зачислятся через пару секунд.</p>}
+        </>}
         {status === 'pending' && intent.method === 'STARS' && <>
           <p className="dep-hint">{intent.invoice ? <>Счёт на <b>{intent.amount} Stars</b> создан. Оплатите его в Telegram, звёзды в игре появятся сразу после подтверждения. Счёт действует {cfg.ttlMin} мин.</> : <>Тестовая оплата <b>{intent.amount} Stars</b>.</>}</p>
           {intent.invoice
@@ -437,7 +491,8 @@ export function DepositModal({ onClose, onNotice }: { onClose: () => void; onNot
             : <p className="dep-hint">Тестовый режим: деньги не списываются, звёзды зачисляются сейчас.</p>}
           <p className="dep-hint">Ждём подтверждение, окно обновится само.</p>
         </>}
-        {status === 'pending' && intent.method !== 'STARS' && <>
+        {status === 'pending' && intent.method !== 'STARS' && !isProvider(intent.method) && !intent.address && <p className="dep-hint">Тестовый режим: деньги не списываются, звёзды зачислятся через пару секунд.</p>}
+        {status === 'pending' && intent.method !== 'STARS' && !isProvider(intent.method) && !!intent.address && <>
           {intent.method === 'TON' && <p className="dep-hint">Отправьте ровно {shown} TON на адрес ниже. <b>Комментарий обязателен</b>, без него платёж не зачтётся. Действует {cfg.ttlMin} мин.</p>}
           {intent.method === 'USDT_TON' && <p className="dep-hint">Отправьте <b>ровно {shown} USDT</b> (сеть TON) со своего кошелька <b>{intent.sender ? `${intent.sender.slice(0, 6)}…${intent.sender.slice(-4)}` : ''}</b>. Сумму не округляйте. Действует {cfg.ttlMin} мин.</p>}
           {intent.method === 'USDT_TRC20' && <p className="dep-hint">Отправьте <b>ровно {shown} USDT</b> только в сети <b>TRON (TRC20)</b> со своего кошелька <b>{intent.sender ? `${intent.sender.slice(0, 5)}…${intent.sender.slice(-4)}` : ''}</b>. Сумму не округляйте. Перевод в другой сети будет потерян. Действует {cfg.ttlMin} мин.</p>}
@@ -454,4 +509,38 @@ export function DepositModal({ onClose, onNotice }: { onClose: () => void; onNot
       </>}
     </div>
   </div>
+}
+
+// GET к серверу игры с подписью Telegram; null, если сервера нет (демо) или запрос не удался
+export async function serverGet<T>(path: string): Promise<T | null> {
+  try {
+    await siteConfig()
+    if (LOCAL || !initData()) return null
+    const r = await fetch(`${API}${path}`, { headers: hdr() })
+    return r.ok ? ((await r.json()) as T) : null
+  } catch { return null }
+}
+
+// Запрос к серверу игры с подписью Telegram и разбором ответа. null: сервера нет (демо, GitHub Pages без Worker) или нет связи.
+// status показывает, что ответил сервер (4xx: заявку отклонили, повторять нельзя; 5xx: можно повторить позже)
+export async function serverJson<T = any>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ ok: boolean; status: number; data: T } | null> {
+  try {
+    await siteConfig()
+    if (LOCAL || !initData()) return null
+    const r = await fetch(`${API}${path}`, { method, headers: hdr(), body: body === undefined ? undefined : JSON.stringify(body) })
+    let data: any = null; try { data = await r.json() } catch { /* не JSON */ }
+    return { ok: r.ok, status: r.status, data }
+  } catch { return null }
+}
+// есть ли сервер (Worker/VPS) и вход через Telegram: нужен для вывода и отправки истории игр
+export async function serverMode(): Promise<boolean> { await siteConfig(); return !LOCAL && !!initData() }
+
+// POST к серверу игры с подписью Telegram; false, если сервера нет (демо) или запрос не удался
+export async function serverPost(path: string, body: unknown): Promise<boolean> {
+  try {
+    await siteConfig()
+    if (LOCAL || !initData()) return false
+    const r = await fetch(`${API}${path}`, { method: 'POST', headers: hdr(), body: JSON.stringify(body) })
+    return r.ok
+  } catch { return false }
 }

@@ -222,6 +222,7 @@ export function Roulette({ ctx }: { ctx: Ctx }) {
           </g>
           <circle cx="100" cy="100" r="98" fill="none" stroke="#e9d38a" strokeWidth="3" />
           <circle cx="100" cy="100" r="52" fill="#10161a" stroke="#e9d38a" strokeWidth="2.5" />
+          
           <text x="100" y="101" className={`rl-center rl-${num === null ? 'none' : colorOf(num)}`} fontSize="30" fontWeight="900" textAnchor="middle" dominantBaseline="middle" fill="#e9d38a">{spinning ? '···' : num === null ? '?' : num}</text>
         </svg>
         <div className="wheel-ptr" />

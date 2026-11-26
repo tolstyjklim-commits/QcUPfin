@@ -5,6 +5,7 @@ import { AuthGate } from './auth'
 import './styles.css'
 import './ext.css'
 import './polish.css'
+import './graphite.css'
 
 const tg = (window as any).Telegram?.WebApp
 tg?.ready?.()

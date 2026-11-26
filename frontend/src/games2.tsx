@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Burst } from './fx'
+import { HubCap } from './brand'
 import { play } from './sfx'
 import { rint, money, cfmt } from './lib'
 import { Result, StakeInput } from './games'
@@ -17,10 +18,20 @@ const pct = (p: number) => (p >= 10 ? p.toFixed(0) : p >= 1 ? p.toFixed(1) : p >
 
 // ============================== КОСТИ ==============================
 const PIPS: Record<number, number[]> = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] }
-function Die({ v, rolling, i, win }: { v: number; rolling: boolean; i: number; win?: boolean | null }) {
+// какая грань смотрит на игрока: 1 спереди, 6 сзади, 3 справа, 4 слева, 2 сверху, 5 снизу (противоположные дают 7)
+const FACE_ROT: Record<number, [number, number]> = { 1: [0, 0], 6: [0, 180], 3: [0, -90], 4: [0, 90], 2: [-90, 0], 5: [90, 0] }
+function Die({ v, seq, i, win }: { v: number; seq: number; i: number; win?: boolean | null }) {
+  const [bx, by] = FACE_ROT[v] || [0, 0]
+  // кубик каждый бросок делает несколько полных оборотов и останавливается нужной гранью
+  const rx = bx + 360 * seq * 2, ry = by + 360 * (seq * 3 + i)
   return (
-    <div className={`die ${rolling ? 'rolling' : 'land'} ${win === true ? 'win' : win === false ? 'lose' : ''}`} style={{ animationDelay: `${i * 0.09}s` }}>
-      {Array.from({ length: 9 }, (_, k) => <i key={k} className={PIPS[v].includes(k) ? 'on' : ''} />)}
+    <div className={`die3 ${win === true ? 'win' : win === false ? 'lose' : ''}`} style={{ ['--dir' as string]: i === 0 ? -1 : 1, ['--delay' as string]: `${i * 0.09}s` }}>
+      <div className={`die-throw ${seq ? `t${seq % 2}` : ''}`}>
+        <div className="cube" style={{ transform: `rotateX(${rx}deg) rotateY(${ry}deg)` }}>
+          {[1, 2, 3, 4, 5, 6].map(n => <div key={n} className={`die-face f${n}`}>{Array.from({ length: 9 }, (_, k) => <i key={k} className={PIPS[n].includes(k) ? 'on' : ''} />)}</div>)}
+        </div>
+      </div>
+      <span className={`die-shadow ${seq ? `t${seq % 2}` : ''}`} />
     </div>
   )
 }
@@ -32,6 +43,7 @@ export function Dice({ ctx }: { ctx: Ctx }) {
   const [stake, setStake] = useState(50)
   const [faces, setFaces] = useState<[number, number]>([3, 5])
   const [rolling, setRolling] = useState(false)
+  const [seq, setSeq] = useState(0) // номер броска: от него зависит анимация
   const [res, setRes] = useState<{ ok: boolean; text: string; tier: number } | null>(null)
   const [last, setLast] = useState<{ v: number; ok: boolean }[]>([])
   const timers = useRef<number[]>([])
@@ -69,12 +81,14 @@ export function Dice({ ctx }: { ctx: Ctx }) {
     const ok = sel.includes(v)
     const w = ok ? Math.floor(stake * mult) : 0
     pending.current = { w }
+    setFaces([a, b]); setSeq(n => n + 1) // кубики сразу «знают» итог, а зритель видит бросок, три отскока и остановку
     setRolling(true); setRes(null)
-    const fl = window.setInterval(() => { setFaces([1 + rint(6), 1 + rint(6)]); play.roll() }, 90)
+    const fl = window.setInterval(() => play.roll(), 95) // перестук катящихся кубиков
     timers.current.push(fl)
+    ;[480, 840, 1170].forEach((ms, k) => timers.current.push(window.setTimeout(() => play.bounce(k * 3), ms))) // отскоки
     timers.current.push(window.setTimeout(() => {
       clearInterval(fl); pending.current = null
-      setFaces([a, b]); setRolling(false); play.thud()
+      setRolling(false); play.thud()
       setLast(h => [{ v, ok }, ...h].slice(0, 12))
       if (ok) {
         ctx.pay(w, 'Кости — выигрыш')
@@ -82,7 +96,7 @@ export function Dice({ ctx }: { ctx: Ctx }) {
         if (tier === 3) play.jackpot(); else if (tier === 2) play.big(); else play.chime(1)
         setRes({ ok: true, tier, text: `Выпало ${two ? `${a} + ${b} = ${v}` : v}. Выигрыш +${cfmt(w)} (×${fm(mult)})` })
       } else { play.lose(); setRes({ ok: false, tier: 0, text: `Выпало ${two ? `${a} + ${b} = ${v}` : v}. Ставка сгорела` }) }
-    }, 1300))
+    }, 1500))
   }
   const done = !rolling && res
   return (
@@ -91,8 +105,8 @@ export function Dice({ ctx }: { ctx: Ctx }) {
       <div className={`dice-table ${rolling ? 'rolling' : ''} ${done ? (res!.ok ? 'win' : 'lose') : ''}`}>
         <div className="dice-felt" />
         <div className="dice-row">
-          <Die v={faces[0]} rolling={rolling} i={0} win={done ? res!.ok : null} />
-          {two && <Die v={faces[1]} rolling={rolling} i={1} win={done ? res!.ok : null} />}
+          <Die v={faces[0]} seq={seq} i={0} win={done ? res!.ok : null} />
+          {two && <Die v={faces[1]} seq={seq} i={1} win={done ? res!.ok : null} />}
         </div>
         {done && res!.ok && <Burst key={`d${last.length}`} type={res!.tier === 3 ? 'confetti' : 'gold'} n={res!.tier === 3 ? 180 : res!.tier === 2 ? 100 : 55} />}
       </div>
@@ -266,7 +280,7 @@ function WheelPlay({ ctx, rid, onBack }: { ctx: Ctx; rid: string; onBack: () => 
             {gifts && segs.map((s, i) => { const ang = (i + 0.5) * (360 / n), [x, y] = polar(66, ang); return <foreignObject key={`g${i}`} x={x - 17} y={y - 17} width={34} height={34} transform={`rotate(${ang} ${x} ${y})`}><div className="wheel-gift"><GiftArt kind={s.kind!} size={30} glow={false} /></div></foreignObject> })}
           </g>
           <circle cx="100" cy="100" r="98" fill="none" stroke="#e9d38a" strokeWidth="3" />
-          <circle cx="100" cy="100" r="22" fill="#10161a" stroke="#e9d38a" strokeWidth="2.5" />
+          <HubCap />
           <text x="100" y="101" fill="#e9d38a" fontSize={gifts ? 8 : 10} fontWeight="900" textAnchor="middle" dominantBaseline="middle">{spinning ? '···' : res && !gifts ? `×${fm(res.seg.m)}` : 'КРУТИ'}</text>
         </svg>
         <div className="wheel-ptr" />
@@ -284,10 +298,9 @@ function WheelPlay({ ctx, rid, onBack }: { ctx: Ctx; rid: string; onBack: () => 
         </div>)}
       </div>
       {gifts
-        ? <p className="m small center">Билет {cfmt(cost)}. {B?.pAbove ? `Шанс выбить подарок дороже билета: ${pct(B.pAbove)}.` : ''} Каждый сектор выпадает с равным шансом, средний приз ≈ {Math.round((B?.ev || 0) * 100)}% от цены билета.</p>
+        ? null
         : <StakeInput value={stake} onChange={setStake} balance={ctx.save.balance} disabled={spinning} />}
       <button className="cta" disabled={spinning || !B} onClick={spin}>{spinning ? 'Колесо крутится…' : `Крутить · ${cfmt(cost)}`}</button>
-      {!gifts && <p className="m small center">{W.note}. Каждый сектор выпадает с равным шансом, шансы в списке выше показаны как есть.</p>}
     </div>
   )
 }
@@ -369,7 +382,6 @@ export function WheelMenu({ onPick, plain }: { onPick: (id: string) => void; pla
           </button>
         ))}
       </div>
-      {!plain && <p className="m small center">Выбери колесо. Каждый сектор выпадает с равным шансом, призы видны в секторах.</p>}
     </div>
   )
 }
@@ -389,12 +401,17 @@ const TIERS: Tier[] = [
   { id: 'dia', name: 'Алмаз', price: 2500, hue: 280, note: 'Редко и очень крупно', prizes: [{ m: 3, p: 0.08, sym: 'clover' }, { m: 10, p: 0.02, sym: 'gem' }, { m: 50, p: 0.004, sym: 'crown' }, { m: 250, p: 0.00064, sym: 'rocket' }] },
 ]
 export const tierRtp = (t: Tier) => t.prizes.reduce((a, x) => a + x.m * x.p, 0)
-const FILL: IconName[] = ['cherry', 'lemon', 'bell', 'gem', 'crown', 'clover', 'rocket']
 
 export function Scratch({ ctx }: { ctx: Ctx }) {
   const [tid, setTid] = useState('silver')
   const T = TIERS.find(x => x.id === tid)!
-  const [card, setCard] = useState<{ syms: IconName[]; m: number; id: number; tier: string } | null>(null)
+  const gifts = useMemo(() => GIFT_ORDER.filter(k => GIFTS[k] && !GIFTS[k].nft && !GIFTS[k].retired).sort((a, b) => GIFTS[a].base - GIFTS[b].base), [GIFT_ORDER.length]) // eslint-disable-line react-hooks/exhaustive-deps
+  // чем крупнее выигрыш, тем дороже подарок на карте
+  const symFor = (t: Tier, m: number): string => {
+    const asc = [...t.prizes].sort((a, b) => a.m - b.m), r = asc.findIndex(x => x.m === m)
+    return gifts[Math.min(gifts.length - 1, Math.floor(((r + 0.5) / asc.length) * gifts.length))] || ''
+  }
+  const [card, setCard] = useState<{ syms: string[]; m: number; id: number; tier: string } | null>(null)
   const [done, setDone] = useState(false)
   const [res, setRes] = useState<{ ok: boolean; text: string; m: number } | null>(null)
   const cv = useRef<HTMLCanvasElement>(null)
@@ -410,17 +427,18 @@ export function Scratch({ ctx }: { ctx: Ctx }) {
   }, [])
   const buy = () => {
     if (card && !done) return
+    if (!gifts.length) { ctx.notify('Каталог подарков ещё грузится'); return }
     if (!ctx.charge(T.price, `Скретч-карта «${T.name}»`)) return
     ctx.bump('scratch')
     // Итог карты выбирается один раз при покупке по таблице шансов
-    let r = Math.random(), m = 0, sym: IconName = 'cherry'
-    for (const pz of T.prizes) { if (r < pz.p) { m = pz.m; sym = pz.sym; break } r -= pz.p }
-    let syms: IconName[]
+    let r = Math.random(), m = 0, sym = ''
+    for (const pz of T.prizes) { if (r < pz.p) { m = pz.m; sym = symFor(T, pz.m); break } r -= pz.p }
+    let syms: string[]
     if (m > 0) syms = [sym, sym, sym]
     else {
-      const pool: IconName[] = [...new Set([...T.prizes.map(x => x.sym), ...FILL])]
+      const pool = [...new Set([...T.prizes.map(x => symFor(T, x.m)), ...gifts])]
       do { syms = [0, 1, 2].map(() => pool[rint(pool.length)]) } while (syms[0] === syms[1] && syms[1] === syms[2])
-      if (Math.random() < 0.35) { const k = rint(3); const o = rint(2); const j = [0, 1, 2].filter(x => x !== k)[o]; syms[j] = syms[k]; if (syms[0] === syms[1] && syms[1] === syms[2]) syms[j] = pool.find(x => x !== syms[k]) || 'cherry' }
+      if (Math.random() < 0.35) { const k = rint(3); const o = rint(2); const j = [0, 1, 2].filter(x => x !== k)[o]; syms[j] = syms[k]; if (syms[0] === syms[1] && syms[1] === syms[2]) syms[j] = pool.find(x => x !== syms[k]) || gifts[0] }
     }
     pending.current = { w: Math.floor(T.price * m) }
     setCard({ syms, m, id: Date.now(), tier: T.id }); setDone(false); setRes(null); play.card()
@@ -436,7 +454,8 @@ export function Scratch({ ctx }: { ctx: Ctx }) {
     g.globalAlpha = 0.18; g.fillStyle = '#fff'
     for (let i = 0; i < 260; i++) g.fillRect(Math.random() * w, Math.random() * h, 2, 2)
     g.globalAlpha = 0.5; g.fillStyle = '#6b7478'; g.font = '800 15px system-ui,sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'
-    g.fillText('СОТРИ ЗАЩИТНЫЙ СЛОЙ', w / 2, h / 2)
+    g.fillText('СОТРИ ЗАЩИТНЫЙ СЛОЙ', w / 2, h / 2 - 8)
+    g.globalAlpha = 0.5; g.font = '800 12px system-ui,sans-serif'; g.fillText('QcUp', w / 2, h / 2 + 10)
     g.globalAlpha = 1
   }, [card?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   const finish = () => {
@@ -482,7 +501,7 @@ export function Scratch({ ctx }: { ctx: Ctx }) {
       <div className={`scratch-card ${win === true ? 'win' : win === false ? 'lose' : ''}`} style={{ ['--th' as string]: t.hue }}>
         <div className="sc-head"><b>{t.name}</b><span>{card ? 'Найди три одинаковых символа' : t.note}</span></div>
         <div className="sc-field">
-          <div className="sc-syms">{(card ? card.syms : [null, null, null]).map((s, i) => <div key={i} className={card && done && card.m > 0 ? 'hit' : ''}>{s ? <Icon name={s} size={58} /> : <span className="q">?</span>}</div>)}</div>
+          <div className="sc-syms">{(card ? card.syms : [null, null, null]).map((s, i) => <div key={i} className={card && done && card.m > 0 ? 'hit' : ''}>{s ? <GiftArt kind={s} size={96} glow={false} /> : <span className="q">?</span>}</div>)}</div>
           {card && <canvas key={card.id} ref={cv} className="sc-coat" onPointerDown={e => { drawing.current = true; lastPt.current = pt(e); e.currentTarget.setPointerCapture(e.pointerId); erase(e) }} onPointerMove={erase} onPointerUp={() => { drawing.current = false; lastPt.current = null }} onPointerCancel={() => { drawing.current = false }} />}
         </div>
         {done && res?.ok && <Burst key={card!.id} type={res.m >= 50 ? 'confetti' : 'gold'} n={res.m >= 50 ? 200 : res.m >= 5 ? 110 : 60} />}
@@ -492,7 +511,7 @@ export function Scratch({ ctx }: { ctx: Ctx }) {
       <button className="cta" disabled={(!!card && !done) || ctx.save.balance < t.price} onClick={buy}>{card && !done ? 'Сотри слой…' : card ? `Ещё карту · ${cfmt(t.price)}` : `Купить карту · ${cfmt(t.price)}`}</button>
       <h3 className="sub-title">Что можно выиграть · {t.name}</h3>
       <div className="sc-table">
-        {[...t.prizes].sort((a, b) => b.m - a.m).map(p => <div key={p.m}><span className="sy"><Icon name={p.sym} size={20} /><Icon name={p.sym} size={20} /><Icon name={p.sym} size={20} /></span><b>×{fm(p.m)}</b><em>{cfmt(Math.floor(t.price * p.m))}</em><i>{pct(p.p * 100)}</i></div>)}
+        {[...t.prizes].sort((a, b) => b.m - a.m).map(p => <div key={p.m}><span className="sy"><GiftArt kind={symFor(t, p.m)} size={22} glow={false} /><GiftArt kind={symFor(t, p.m)} size={22} glow={false} /><GiftArt kind={symFor(t, p.m)} size={22} glow={false} /></span><b>×{fm(p.m)}</b><em>{cfmt(Math.floor(t.price * p.m))}</em><i>{pct(p.p * 100)}</i></div>)}
       </div>
       <p className="m small center">Выигрыш определён в момент покупки, стирание его не меняет. Три одинаковых символа выигрывают, два совпавших ничего не дают.</p>
     </div>
@@ -559,6 +578,7 @@ export function Tower({ ctx }: { ctx: Ctx }) {
     <div className="tower-game">
       <div className="hl-info"><div><small>Этаж</small><b>{floor}/{cur.floors}</b></div><div><small>Сейчас</small><b>{run ? `×${fm(nowMult)}` : '—'}</b></div><div><small>Следующий</small><b>×{fm(nextMult)}</b></div></div>
       <div className={`tower ${run?.over === 'lost' ? 'tw-lost' : ''} ${run?.over === 'cash' ? 'tw-won' : ''}`}>
+        
         {rows.map(f => {
           const isCur = active && f === floor
           const passed = !!run && f < floor && !(run.over === 'lost' && f === run.lost)

@@ -1,0 +1,273 @@
+/* графитовая тема: тёмные зелёно-серые тона заменены нейтральными, акцент остаётся мятным. Файл сгенерирован из styles/ext/polish */
+html.gr body{background:#1e1f20}
+html.gr .bg-glow{background:radial-gradient(circle at 30% 20%,#424446 0,transparent 40%),
+              radial-gradient(circle at 80% 80%,#383a3c 0,transparent 40%)}
+html.gr .app-shell{background:linear-gradient(180deg,#222325,#1c1d1e 65%,#202123)}
+html.gr .balance-pill,html.gr .ton-pill{background:#323335}
+html.gr .balance-pill small{color:#cccdce}
+html.gr .subline{color:#9fa0a2}
+html.gr .game-card{background:#333537;box-shadow:0 12px 24px #0f101155,inset 0 1px #ffffff28}
+html.gr .game-card:hover{box-shadow:0 20px 32px #0f101188}
+html.gr .game-card:after{background:linear-gradient(180deg,transparent,#101011e8)}
+html.gr .card-desc{color:#cccdce}
+html.gr .players,html.gr .game-tag{background:#1e1f20cc}
+html.gr .game-tag{background:#2b2c2ed9}
+html.gr .game-tag.LIVE{background:#2e2f31}
+html.gr .game-tag.NEW{background:#4b5056}
+html.gr .muted{color:#b0b1b2}
+html.gr .secondary-btn{background:#4f5153}
+html.gr .feature-case{background:#2b2c2d}
+html.gr .feature-case p{color:#c9cacb}
+html.gr .task-card{background:#2e2f30}
+html.gr .task-card small{color:#a8a9aa}
+html.gr .task-card button{background:#525457}
+html.gr .bonus-banner{background:linear-gradient(135deg,#424446,#383a3c)}
+html.gr .bonus-banner p{color:#d7d8da}
+html.gr .info-note,html.gr .fine-print{color:#a4a6a8}
+html.gr .stats-row>div{background:#2e2f30}
+html.gr .stats-row small{color:#acadaf}
+html.gr .bottom-nav{background:#3a3c3eeF;border:1px solid #91929477}
+html.gr .nav-item{color:#c2c3c5}
+html.gr .nav-item.active{background:#616467}
+html.gr footer{color:#aaabad}
+html.gr .modal-backdrop{background:#0d0d0dd9}
+html.gr .game-modal,html.gr .wallet-modal{background:#28292b}
+html.gr .result{background:#414346}
+html.gr .game-controls p{color:#c1c2c4}
+html.gr .stake-row{color:#c1c2c4}
+html.gr .stake-controls{background:#2e2f30}
+html.gr .stake-controls button{background:#37393b}
+html.gr .upgrade-wheel{background:conic-gradient(from -90deg,#424446,#50a781,#4b5056,#424446,#252628,#5ebd94,#424446,#3a3d40,#4c1d1d,#424446);border:8px solid #333537}
+html.gr .reels-wrap{background:#1d1e1f;border:1px solid #4f5052}
+html.gr .reel{background:#28292b}
+html.gr .reel-cell{background:#393b3d;border:2px solid #494a4c}
+html.gr .reel-cell.win-cell{background:#2e2f31}
+html.gr .crash-stage{background:radial-gradient(ellipse at 50% 0,#505254 0,transparent 45%),linear-gradient(180deg,#1a1a1b,#232425 70%,#3a3b3d)}
+html.gr .rocket-start{background:linear-gradient(120deg,#52ab84,#424447)}
+html.gr .rocket-result{background:#414346}
+html.gr .crash-history>*{background:#37383a}
+html.gr .slot-grid-3{background:#1d1e1f;border:1px solid #4f5052}
+html.gr .slot-cell{background:#393b3d;border:2px solid #494a4c}
+html.gr .slot-spin:disabled{background:#72757a}
+html.gr .mines-grid button{background:linear-gradient(145deg,#585a5d,#343537)}
+html.gr .mines-grid button.safe{background:#50565f}
+html.gr .plinko-board{background:#2e2f31}
+html.gr .cards-score{background:#363739}
+html.gr .doors button{background:#3a3b3d}
+html.gr .doors small{color:#c2c3c5}
+html.gr .wallet-balances>div{background:#333537}
+html.gr .wallet-balances small{color:#b2b3b5}
+html.gr .wallet-actions button{background:#56595c}
+html.gr .tx-icon.plus{background:#2e2f31}
+html.gr .tx-row small{color:#a5a7a9}
+html.gr .empty-history{color:#abacae}
+html.gr .payment-option,html.gr .demo-deposit{background:#333537}
+html.gr .payment-option p,html.gr .demo-deposit p{color:#bbbcbe}
+html.gr .demo-deposit input{background:#1e1f20}
+html.gr .toast{color:#2a2b2d}
+html.gr .m{color:#aeb0b2}
+html.gr .cta.green{color:#121314}
+html.gr .cta.ghost{background:#36383a}
+html.gr .stake-line input{border:1px solid #3f4144;background:#2c2e30}
+html.gr .stake-line button{background:#36383a}
+html.gr .stake-presets button{background:#2c2e30;border:1px solid #3f4144;color:#d9dadc}
+html.gr .result{background:#2e2f31}
+html.gr .result.good{background:#202123}
+html.gr .chips span{background:#2c2e30;border:1px solid #3f4144}
+html.gr .stage{background:radial-gradient(circle at 50% 75%,#444648 0,#1e1f20 72%);border:1px solid #3f4144}
+html.gr .upg-slot{background:#2c2e30;border:1px solid #3f4144}
+html.gr .upg-targets button{background:#2c2e30;border:1px solid #3f4144;color:#aeb0b2}
+html.gr .pick-row button{background:#2c2e30;border:1px solid #3f4144;color:#aeb0b2}
+html.gr .reels{background:#2c2e30;border:1px solid #3f4144}
+html.gr .cell{background:#1e1f20}
+html.gr .case-stage{background:radial-gradient(circle at 50% 60%,#4b4e52,#1e1f20 75%);border:1px solid #3f4144}
+html.gr .mgrid button{background:#36383a;border:1px solid #3f4144}
+html.gr .mgrid button.safe{background:#202123}
+html.gr .pboard{background:#2c2e30;border:1px solid #3f4144}
+html.gr .bins span{background:#36383a}
+html.gr .pcard{color:#1d1d1e}
+html.gr .doors button{background:#2c2e30;border:1px solid #3f4144}
+html.gr .doors button small{color:#aeb0b2}
+html.gr .doors button.win{background:#202123}
+html.gr .daily-banner{background:#2c2e30;border:1px solid #3f4144}
+html.gr .daily-banner i{color:#5a5f66}
+html.gr .daily-banner:not(.ready) i{background:#36383a}
+html.gr .subtabs{background:#2c2e30}
+html.gr .subtabs button{color:#aeb0b2}
+html.gr .gift-sum{color:#aeb0b2}
+html.gr .gift-row{background:#2c2e30;border:1px solid #3f4144}
+html.gr .gift-row small{color:#aeb0b2}
+html.gr .gift-act button:disabled{background:#36383a}
+html.gr .catalog span{background:#2c2e30;border:1px solid #3f4144}
+html.gr .daily-card{background:#2c2e30;border:1px solid #3f4144}
+html.gr .daily-days span{background:#1e1f20;color:#d9dadc}
+html.gr .daily-days span small{color:#aeb0b2}
+html.gr .daily-days span.done{background:#202123}
+html.gr .task-card strong{color:#d9dadc}
+html.gr .task-card button:not(:disabled){color:#121314}
+html.gr .bar{background:#3f4144}
+html.gr .empty-history{color:#aeb0b2}
+html.gr .gift-act small{color:#aeb0b2}
+html.gr .stage{border:1px solid #3f4144}
+html.gr .roll-view{background:linear-gradient(#212223,#303234);border:1px solid #3f4144}
+html.gr .roll-view::before{background:linear-gradient(90deg,#212223,transparent)}
+html.gr .roll-view::after{background:linear-gradient(270deg,#212223,transparent)}
+html.gr .mcell .front{background:linear-gradient(#474a4e,#313234);border:1px solid #56585c}
+html.gr .mcell .back{background:#303133}
+html.gr .mcell .back.safe{background:#262728}
+html.gr .bins span{background:#3d3f41}
+html.gr .felt{background:radial-gradient(ellipse at center,#3c3e41,#222324);border:1px solid #51565c}
+html.gr .reels5{background:linear-gradient(#212223,#303234);border:1px solid #3f4144}
+html.gr .reel-win{background:#1b1c1d}
+html.gr .reels.three{background:linear-gradient(#212223,#303234);border:1px solid #3f4144}
+html.gr .cell.big{background:#1b1c1d}
+html.gr .mcell .front{background:linear-gradient(#474a4e,#313234);border:1px solid #56585c}
+html.gr .mcell .face.safe{background:#262728}
+html.gr .doors{background:linear-gradient(#2d2e2f,#1b1b1c);border:1px solid #3e4042}
+html.gr .door.lose .room{background:radial-gradient(ellipse at 50% 70%,#707172,#1c1c1d 70%,#000)}
+html.gr .case-card{background:linear-gradient(160deg,color-mix(in srgb,var(--cc) 28%,#212224),#1c1d1e)}
+html.gr .sheet{background:#1c1d1e}
+html.gr .sheet-tabs button{background:#2b2c2d;color:#b2b2b3}
+html.gr .sheet-list button{border:1px solid #3a3b3d;background:#242526}
+html.gr .sheet-close{background:#343537}
+html.gr .case-item{background:#242526;border:1px solid #3a3b3d}
+html.gr .case-item.up{background:linear-gradient(#242527,#242526)}
+html.gr .case-item i{color:#b2b5b8}
+html.gr .optrow button{border:1px solid #3a3b3d;background:#242526}
+html.gr .fastopt{color:#b2b2b3}
+html.gr .fine-print.house{color:#9ea0a3}
+html.gr .dep-btn{background:linear-gradient(135deg,var(--neon),#585f69);color:#121314}
+html.gr .demo-card{background:#2e2f31}
+html.gr .upg-targets button.more{background:#38393b}
+html.gr .coins{background:radial-gradient(ellipse 70% 55% at 50% 0%,rgba(255,224,138,.20),transparent 70%),radial-gradient(ellipse at 50% 120%,#4c4f54,#222324 70%);border:1px solid #56585c}
+html.gr .streak{background:#2c2e30;border:1px solid #3f4144}
+html.gr .cta:not(.ghost):not(.gold):not(:disabled){color:#131314}
+html.gr .optrow button.on,html.gr .stake-presets button.on,html.gr .upg-targets button.on{color:#131314}
+html.gr .dep-method{border:1px solid #353637;background:#1e1e1f}
+html.gr .dep-method small{color:#a6a8aa}
+html.gr .dep-method.on{background:#252729}
+html.gr .lvl-chip{border:2px solid #1a1b1c}
+html.gr .lvl-card{background:linear-gradient(135deg,#252729,#1c1d1f);border:1px solid #3a3c3f}
+html.gr .lvl-top small{color:#a6a8aa}
+html.gr .lvl-bar{background:#303234}
+html.gr .ach{background:#1e1e1f;border:1px solid #303234}
+html.gr .ach.got{background:linear-gradient(135deg,#252729,#1e1e1f)}
+html.gr .ach small{color:#a6a8aa}
+html.gr .cab .reels5,html.gr .cab .reels.three{background:linear-gradient(#0d0d0d,#1b1b1c)}
+html.gr .cab .reel-win{background:linear-gradient(180deg,#ecedee 0,#d4d5d7 8%,#f7fbf8 30%,#fff 50%,#f7fbf8 70%,#d4d5d7 92%,#ecedee 100%)}
+html.gr .cab .reels.three{background:linear-gradient(#0d0d0d,#1b1b1c)}
+html.gr .cab .cell.big{background:linear-gradient(180deg,#dddedf,#fff 35%,#fff 65%,#d8d9da)}
+html.gr .paytable{background:#1e1e1f;border:1px solid #303234}
+html.gr .pt-grid>div{background:#262728}
+html.gr .game-card:after{background:linear-gradient(180deg,transparent,#0d0d0e66)}
+html.gr .game-banner{background:#212223;box-shadow:0 10px 24px #0f101155}
+html.gr .gb-text span{color:#b0b1b2}
+html.gr .game-view[data-game=plinko] .game-banner{background:linear-gradient(135deg,#17293f,#272a2f)}
+html.gr .upg-add{background:#242526}
+html.gr .sheet-list button em.chk{border:2px solid #5a5d60;color:#121314}
+html.gr .multi-grid{background:radial-gradient(ellipse at 50% 0,color-mix(in srgb,var(--cc,#6aa8ff) 28%,#212223),#1b1c1d);border:1px solid #3f4144}
+html.gr .race-board{border:1px solid #3f4144}
+html.gr .lb-row{background:#242526}
+html.gr .lb-row.mine{background:color-mix(in srgb,var(--cc) 14%,#242526)}
+html.gr .lb-row em{color:#a5a6a8}
+html.gr .race-feed span{background:#242526}
+html.gr .race-cars button{border:1px solid #3a3b3d;background:#242526}
+html.gr .race-cars .stats u{color:#a5a6a8}
+html.gr .race-cars button small{color:#a5a6a8}
+html.gr .race-cars button.on{background:color-mix(in srgb,var(--cc) 14%,#242526)}
+html.gr .auth-screen{background:radial-gradient(circle at 50% 0,#2a2c2f,#151617 70%)}
+html.gr .auth-card p{color:#bfc1c3}
+html.gr .auth-retry{color:#a5a6a8}
+html.gr .auth-hint{color:#a5a6a8!important}
+html.gr .case-cats button{background:#242526;border:1px solid #3a3b3d}
+html.gr .case-cats button.on{background:linear-gradient(180deg,#3aa07a,#4c535c)}
+html.gr .jp-box{background:linear-gradient(135deg,color-mix(in srgb,var(--cc) 22%,#212224),#1c1d1e)}
+html.gr .jp-box span{color:#bfc1c3}
+html.gr .jp-box i{background:#121314}
+html.gr .hl-screen{background:radial-gradient(circle at 50% 0,#333538,#151617 72%);border:1px solid #3a3b3d}
+html.gr .hl-reel{background:linear-gradient(180deg,#111112,#1f2021 50%,#111112)}
+html.gr .hl-scale{color:#a5a6a8}
+html.gr .hl-zone{color:#bfc1c3}
+html.gr .hl-modes{background:#1e1f20;border:1px solid #3a3b3d}
+html.gr .hl-modes button{color:#bfc1c3}
+html.gr .hl-modes button.on{background:linear-gradient(180deg,#3aa07a,#4c535c);box-shadow:0 4px 14px #4c535c66}
+html.gr .hl-ctl{background:#1e1f20;border:1px solid #3a3b3d}
+html.gr .hl-row{color:#a5a6a8}
+html.gr .hl-presets button{background:#2a2b2d}
+html.gr .hl-presets button.on{background:#373a3e}
+html.gr .hl-info div{background:#242526}
+html.gr .hl-info small{color:#a5a6a8}
+html.gr .up-chance{color:#bfc1c3}
+html.gr .dice-table{background:radial-gradient(circle at 50% 30%,#3e4247,#1f2225 75%);border:1px solid #3a3b3d}
+html.gr .dice-sel button{background:#2a2b2d}
+html.gr .dice-sel button small{color:#a5a6a8}
+html.gr .dice-sel button.on{background:linear-gradient(180deg,#3aa07a,#4c535c);box-shadow:0 4px 12px #4c535c66}
+html.gr .wheel-legend div{background:#242526}
+html.gr .wheel-legend span{color:#a5a6a8}
+html.gr .tier span{color:#cecfd1}
+html.gr .sc-head span{color:#eaeaeb}
+html.gr .sc-table div{background:#242526}
+html.gr .sc-table i{color:#a5a6a8}
+html.gr .tower{border:1px solid #3a3b3d}
+html.gr .t-row.t-cur .t-tile{background:linear-gradient(180deg,#898c91,#5d6065)}
+html.gr .keno-grid button{background:linear-gradient(180deg,#323334,#272829);box-shadow:0 2px 0 #161617}
+html.gr .keno-quick button{background:#2a2b2d}
+html.gr .keno-pay{background:#1e1f20;border:1px solid #3a3b3d}
+html.gr .kp-title{color:#a5a6a8}
+html.gr .kp-row{background:#262728}
+html.gr .kp-row em{background:#353739;color:#d3d4d6}
+html.gr .kp-w{color:#bfc1c3}
+html.gr .kp-row i{color:#96989b}
+html.gr .kp-row.reach{background:#373b40}
+html.gr .rl-cell.out{background:#303234}
+html.gr .rl-info span{color:#a5a6a8}
+html.gr .rl-info button{background:#2a2b2d}
+html.gr .rl-info button.on{background:#373a3e}
+html.gr .wheel-groups small{color:#a5a6a8}
+html.gr .wm-card{background:linear-gradient(160deg,color-mix(in srgb,var(--wc) 28%,#1f2022),#1a1a1b 70%);border:1px solid color-mix(in srgb,var(--wc) 45%,#313234)}
+html.gr .wm-note{color:#a5a6a8}
+html.gr .wheel-back{background:#2a2b2d}
+html.gr .wheel-title span{color:#a5a6a8}
+html.gr .seg-switch{background:#1e1f20;border:1px solid #3a3b3d}
+html.gr .seg-switch button{color:#bfc1c3}
+html.gr .seg-switch button.on{background:linear-gradient(180deg,#3aa07a,#4c535c);box-shadow:0 4px 14px #4c535c66}
+html.gr .feed{background:linear-gradient(135deg,#252729,#1c1d1f);border:1px solid #3a3c3f}
+html.gr .ref-card{background:linear-gradient(135deg,#252729,#1c1d1f);border:1px solid #3a3c3f}
+html.gr .upg-stars{background:#242526;border:1px solid #3f4144}
+html.gr .upg-stars-head i{color:#999b9e}
+html.gr .upg-stars-head .sw{background:#3b3c3e}
+html.gr .upg-stars-head .sw::after{background:#d6d7d9}
+html.gr .cur-seg{background:#1b1c1d}
+html.gr .cur-seg button{color:#a5a7a9}
+html.gr .cur-seg button.on{background:#3a3c3f}
+html.gr .upg-cta{background:linear-gradient(to top,#1e1f20 70%,#1e1f2000)}
+html.gr .gb-logo{background:#0d0e0fb8}
+html.gr .lvlup-bg{background:#0c0c0dcc}
+html.gr .lvlup{background:linear-gradient(180deg,#2d2e30,#212223)}
+html.gr .lvlup-badge span{color:#131416}
+html.gr .daily-strip{background:#2c2e30;border:1px solid #3f4144}
+html.gr .ds-top span{color:#a5a7a9}
+html.gr .ds-claim{color:#131314}
+html.gr .ds-more{background:#36383a}
+html.gr .ds-day{background:#1e1f20;border:1px solid #36383a;color:#939598}
+html.gr .ds-day i{background:#3b3c3e}
+html.gr .ds-day.done{background:#2a2c2f}
+html.gr .ds-day.today{background:#373a3e}
+html.gr .ds-hint{color:#888a8d}
+html.gr .coll{background:#2c2e30;border:1px solid #3f4144}
+html.gr .coll-bar{background:#1e1f20}
+html.gr .coll-item{background:#1e1f20}
+html.gr .look{background:#2c2e30;border:1px solid #3f4144}
+html.gr .look-row+.look-row{border-top:1px solid #3b3c3e}
+html.gr .look-row small{color:#999b9e}
+html.gr .look-seg{background:#1b1c1d}
+html.gr .look-seg button{color:#a5a7a9}
+html.gr .look-seg button.on{background:#3a3c3f}
+html.gr .sw-green{background:linear-gradient(135deg,#59b58d,#2a2c2f)}
+html.gr .sw{background:#3b3c3e}
+html.gr .sw::after{background:#d6d7d9}
+html.gr .ava-xp{background:#1e1f20}
+html.gr .back-text small{color:#a5a7a9}
+html.gr .cab::after{background:linear-gradient(90deg,#5a3a06 0 50%,#474c52 50%)}
+html.gr .dial .dial-seal{color:#d6d7d9}
+html.gr .wd-item.approved em{background:#25282c}

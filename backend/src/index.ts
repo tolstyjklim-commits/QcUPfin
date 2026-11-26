@@ -23,12 +23,20 @@ app.get('/health', (_req, res) => res.json({ ok: true, service: 'qcup-api' }))
 
 app.get('/api/me', requireTelegramAuth, async (req, res) => {
   const tg = req.telegramUser!
+  // Реферал: при ПЕРВОМ входе запоминаем пригласившего из ссылки вида ?startapp=ref_<telegramId>. Себя пригласить нельзя.
+  let referredById: string | undefined
+  const known = await prisma.user.findUnique({ where: { telegramId: String(tg.id) }, select: { id: true } })
+  const m = /^ref_(\d{1,15})$/.exec(req.startParam || '')
+  if (!known && m && m[1] !== String(tg.id)) {
+    const inviter = await prisma.user.findUnique({ where: { telegramId: m[1] }, select: { id: true } })
+    if (inviter) referredById = inviter.id
+  }
   const user = await prisma.user.upsert({
     where: { telegramId: String(tg.id) },
     update: { username: tg.username, firstName: tg.first_name, photoUrl: tg.photo_url },
     create: {
       telegramId: String(tg.id), username: tg.username, firstName: tg.first_name,
-      photoUrl: tg.photo_url, wallet: { create: { balance: 0n } },
+      photoUrl: tg.photo_url, wallet: { create: { balance: 0n } }, referredById,
     },
     include: { wallet: true },
   })
@@ -37,6 +45,44 @@ app.get('/api/me', requireTelegramAuth, async (req, res) => {
     firstName: user.firstName, balance: user.wallet?.balance.toString() ?? '0',
     currency: user.wallet?.currency ?? 'QCP',
   })
+})
+
+// Реферальная статистика: сколько друзей пришло по ссылке и сколько монет начислено (процент задаёт REF_PERCENT в .env, по умолчанию 5)
+app.get('/api/referrals', requireTelegramAuth, async (req, res) => {
+  const me = await prisma.user.findUnique({ where: { telegramId: String(req.telegramUser!.id) }, select: { id: true } })
+  const percent = Number(process.env.REF_PERCENT ?? 5)
+  if (!me) return res.json({ invited: 0, earned: 0, percent })
+  const invited = await prisma.user.count({ where: { referredById: me.id } })
+  const sum = await prisma.transaction.aggregate({ where: { userId: me.id, type: 'referral' }, _sum: { amount: true } })
+  res.json({ invited, earned: Number(sum._sum.amount ?? 0n), percent })
+})
+
+// Лента выигрышей. Игры считаются в приложении, поэтому сервер не может проверить, что выигрыш настоящий: записи ограничены
+// по размеру и частоте (одна в 20 секунд и не больше 30 в час с игрока), чтобы подделкой нельзя было засорить ленту.
+const shortName = (u: { username?: string; first_name?: string }) => (u.username || u.first_name || 'Игрок').replace(/[<>]/g, '').slice(0, 24)
+app.post('/api/feed', requireTelegramAuth, async (req, res) => {
+  const tg = req.telegramUser!
+  const b = (req.body || {}) as Record<string, unknown>
+  const kind = b.kind === 'gift' ? 'gift' : b.kind === 'win' ? 'win' : ''
+  const game = typeof b.game === 'string' ? b.game.trim().slice(0, 30) : ''
+  const amount = Math.round(Number(b.amount) || 0), mult = Number(b.mult) || 0
+  const gift = typeof b.gift === 'string' && /^[\w:.-]{1,64}$/.test(b.gift) ? b.gift : null
+  if (!kind || !game) return res.status(400).json({ error: 'bad entry' })
+  if (kind === 'win' && !(amount >= 200 && amount <= 1_000_000 && mult >= 1.5 && mult <= 1000)) return res.status(400).json({ error: 'bad win' })
+  if (kind === 'gift' && !gift) return res.status(400).json({ error: 'bad gift' })
+  const user = await prisma.user.findUnique({ where: { telegramId: String(tg.id) }, select: { id: true } })
+  if (!user) return res.status(404).json({ error: 'no user' })
+  const hourAgo = new Date(Date.now() - 3_600_000)
+  const recent = await prisma.feedEntry.findMany({ where: { userId: user.id, createdAt: { gt: hourAgo } }, orderBy: { createdAt: 'desc' }, take: 30, select: { createdAt: true } })
+  if (recent.length >= 30 || (recent[0] && Date.now() - recent[0].createdAt.getTime() < 20_000)) return res.status(429).json({ error: 'too often' })
+  await prisma.feedEntry.create({ data: { userId: user.id, name: shortName(tg), kind, game, amount: BigInt(kind === 'win' ? amount : 0), mult: kind === 'win' ? mult : 0, gift: kind === 'gift' ? gift : null } })
+  res.status(204).end()
+})
+app.get('/api/feed', requireTelegramAuth, async (req, res) => {
+  const since = new Date(Math.max(Number(req.query.since) || 0, Date.now() - 6 * 3_600_000))
+  const me = await prisma.user.findUnique({ where: { telegramId: String(req.telegramUser!.id) }, select: { id: true } })
+  const rows = await prisma.feedEntry.findMany({ where: { createdAt: { gt: since } }, orderBy: { createdAt: 'asc' }, take: 20 })
+  res.json(rows.map(r => ({ id: r.id, kind: r.kind, name: r.name, game: r.game, amount: Number(r.amount), mult: r.mult, gift: r.gift || undefined, at: r.createdAt.getTime(), mine: r.userId === me?.id })))
 })
 
 // Подарки Telegram: автовыгрузка при старте и раз в 30 минут (см. gifts.ts)

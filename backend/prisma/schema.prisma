@@ -15,6 +15,10 @@ model User {
   wallet         Wallet?
   transactions   Transaction[]
   deposits       Deposit[]
+  referredById   String?
+  referredBy     User?    @relation("Referral", fields: [referredById], references: [id])
+  referrals      User[]   @relation("Referral")
+  feed           FeedEntry[]
 }
 model Wallet {
   id        String   @id @default(cuid())
@@ -62,4 +66,20 @@ model Deposit {
   user        User     @relation(fields: [userId], references: [id])
   @@index([userId, createdAt])
   @@index([status, expiresAt])
+}
+
+// Лента выигрышей: крупные выигрыши и подарки игроков, их видят все в мини-окошке на главной
+model FeedEntry {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String               // ник, как его показываем другим (username или имя)
+  kind      String               // win | gift
+  game      String
+  amount    BigInt   @default(0) // выигрыш в монетах (для win)
+  mult      Float    @default(0)
+  gift      String?              // id подарка из каталога (для gift)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  @@index([createdAt])
+  @@index([userId, createdAt])
 }

@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import type { Request, Response, NextFunction } from 'express'
 
 export type TelegramUser = { id: number; first_name?: string; last_name?: string; username?: string; photo_url?: string }
-declare global { namespace Express { interface Request { telegramUser?: TelegramUser } } }
+declare global { namespace Express { interface Request { telegramUser?: TelegramUser; startParam?: string } } }
 
 export function validateInitData(initData: string, botToken: string, maxAgeSeconds = 3600): TelegramUser | null {
   if (!initData || !botToken) return null
@@ -31,5 +31,7 @@ export function requireTelegramAuth(req: Request, res: Response, next: NextFunct
   const user = validateInitData(initData, token)
   if (!user) return res.status(401).json({ error: 'Valid Telegram WebApp initData required' })
   req.telegramUser = user
+  // start_param подписан Telegram вместе с остальным initData (hash уже проверен выше)
+  req.startParam = new URLSearchParams(initData).get('start_param') || undefined
   next()
 }

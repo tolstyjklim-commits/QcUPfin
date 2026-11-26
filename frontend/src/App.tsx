@@ -1,4 +1,4 @@
-import { sfx, play } from './sfx'
+import { sfx, play, haptic, setHaptic } from './sfx'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDownLeft, ArrowUpRight, ChevronLeft, Gamepad2, Gift, ListChecks, Package, Plus, Trophy, UserRound, Volume2, VolumeX, X } from 'lucide-react'
 import { Coin, GiftArt, TonIcon, UsdtIcon } from './art'
@@ -6,6 +6,8 @@ import { ACHIEVEMENTS, DAILY_XP, TASK_XP, betXp, levelInfo, rankOf } from './lev
 import { DEMO, SAVE_KEY } from './lib'
 import { tgName } from './auth'
 import { DepositModal, liveRates, ownerDemoUnlocked, useLocalDeposits } from './deposit'
+import { track, flushSync } from './sync'
+import { WithdrawModal, loadWithdrawCfg, useWithdrawRetry, type WCfg } from './withdraw'
 import { GAME_INFO } from './menuart'
 import {
 
@@ -13,8 +15,11 @@ import {
 } from './games'
 import { Dice, Wheel, WheelMenu, Scratch, Tower } from './games2'
 import { Keno, Roulette } from './games3'
+import { BrandDefs, Logotype } from './brand'
+import { FxConfetti, StreakChip, LevelUp, DailyStrip, Collection, LookCard } from './feel'
+import { LiveFeed, ReferralCard } from './feed'
 import {
-  CASE, CASES, DISP, cfmt, CASE_CATS, pctText, GAME_TITLE, caseOddsOf, FLAGS, houseTilt, GIFTS, GIFT_ORDER, COINS_PER_TON, SELL_RATE, STARS_TO_COINS, dateNow, defaultSave, defsFromImport, defsFromNft, loadSave, mergeCatalog, mergeNft, money, persist, setCatalog, todayKey, uid, walkPrices,
+  CASE, CASES, DISP, cfmt, CASE_CATS, pctText, GAME_TITLE, caseOddsOf, FLAGS, houseTilt, GIFTS, GIFT_ORDER, COINS_PER_TON, SELL_RATE, STARS_TO_COINS, dateNow, defaultSave, defsFromImport, defsFromNft, loadSave, savedElsewhere, markLoaded, mergeCatalog, mergeNft, money, persist, setCatalog, todayKey, uid, walkPrices,
   type ImportedGift, type NftCollection,
   type Gift as GiftT, type GiftKind, type Save, type Tx,
 } from './lib'
@@ -49,7 +54,8 @@ const games: GameDef[] = [
 ]
 const TITLES: Record<string, string> = Object.fromEntries(games.map(g => [g.id, g.name]))
 
-const DAILY = [1, 2, 3, 4, 5, 6, 7] // дни серии входов; монет за вход не дают
+const DAILY = [1, 2, 3, 4, 5, 6, 7] // дни серии входов
+const DAILY_STARS = [1, 1, 1, 1, 1, 1, 1] // звёзд за вход по дням серии (по звезде за день)
 const TASKS: { id: string; title: string; hint: () => string; stat: string; target: number }[] = [
   { id: 'crash3', title: '3 раунда в Ракете', hint: () => 'Любая ставка', stat: 'crash', target: 3 },
   { id: 'rounds10', title: '10 раундов в играх', hint: () => 'Любые игры', stat: 'rounds', target: 10 },
@@ -59,22 +65,45 @@ const TASKS: { id: string; title: string; hint: () => string; stat: string; targ
 ]
 
 export default function App() {
-  const [save, setSave] = useState<Save>(() => { const s = loadSave(); setCatalog(s.catalog); return s })
+  const [save, setSave] = useState<Save>(() => { const s = loadSave(); markLoaded(); setCatalog(s.catalog); return s })
   const S = useRef(save)
   const [tab, setTab] = useState<Tab>('Игры')
   const [game, setGame] = useState<GameId | null>(null)
   const [seed, setSeed] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
+  // серия побед подряд: ставка без выплаты следующей ставкой считается проигрышем
+  const [streak, setStreak] = useState(0)
+  const pendingBet = useRef(false)
+  const [lvlUp, setLvlUp] = useState<number | null>(null)
+  const [theme, setTheme] = useState<'green' | 'graphite'>(() => { try { return localStorage.getItem('qcup-theme') === 'graphite' ? 'graphite' : 'green' } catch { return 'green' } })
+  const [hapticOn, setHapticOn] = useState(haptic.on)
+  useEffect(() => {
+    document.documentElement.classList.toggle('gr', theme === 'graphite')
+    try { localStorage.setItem('qcup-theme', theme) } catch { /* хранилище недоступно */ }
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'graphite' ? '#1e1f20' : '#1a2420')
+  }, [theme])
+  // всплывающая сумма у баланса: +выигрыш / −ставка, плашка при этом коротко пульсирует
+  const prevBal = useRef(save.balance)
+  const [delta, setDelta] = useState<{ id: number; v: number } | null>(null)
+  useEffect(() => {
+    const d = save.balance - prevBal.current; prevBal.current = save.balance
+    if (!d || Math.abs(d) < 1) return
+    const id = Date.now(); setDelta({ id, v: d })
+    const t = window.setTimeout(() => setDelta(x => (x && x.id === id ? null : x)), 1300)
+    return () => clearTimeout(t)
+  }, [save.balance])
   const [sound, setSound] = useState(() => localStorage.getItem('qcup-sound') === '1')
   const [confetti, setConfetti] = useState(0)
   const [depositOpen, setDepositOpen] = useState(false)
+  const [wdOpen, setWdOpen] = useState(false)
+  const [wdCfg, setWdCfg] = useState<WCfg | null>(null)
   const [caseCat, setCaseCat] = useState('Все')
   const [caseMode, setCaseMode] = useState<'cases' | 'wheels'>('cases')
   const [demoOk, setDemoOk] = useState(false) // демо-режим владельца (адрес игры + #demo)
   useEffect(() => { ownerDemoUnlocked().then(setDemoOk) }, [])
   // если сохранение изменили в другой вкладке (например, demo.html), подхватываем без перезагрузки
   useEffect(() => {
-    const h = (e: StorageEvent) => { if (e.key === SAVE_KEY) { const s = loadSave(); S.current = s; setSave(s) } }
+    const h = (e: StorageEvent) => { if (e.key === SAVE_KEY) { const s = loadSave(); markLoaded(); S.current = s; setSave(s) } }
     window.addEventListener('storage', h)
     return () => window.removeEventListener('storage', h)
   }, [])
@@ -89,10 +118,15 @@ export default function App() {
     return () => clearInterval(t)
   }, [])
   const pickCur = (c: 'STAR' | 'TON' | 'USDT') => { setCur(c); setCurMenu(false); try { localStorage.setItem('qcup-cur', c) } catch { /* хранилище недоступно */ } }
+  useEffect(() => { // выбор валюты из экранов игр (например, ставка звёздами в апгрейде)
+    const on = (e: Event) => { const c = (e as CustomEvent<string>).detail; if (c === 'STAR' || c === 'TON' || c === 'USDT') pickCur(c) }
+    window.addEventListener('qcup-cur', on); return () => window.removeEventListener('qcup-cur', on)
+  })
   DISP.cur = cur; DISP.ton = rates?.ton || 0; DISP.usdt = rates?.usdt || 0 // игры и тексты показывают суммы в выбранной валюте
   const fmtBal = (stars: number) => cur === 'TON' && rates ? `${(stars / rates.ton).toFixed(3)} TON` : cur === 'USDT' && rates ? `${(stars / rates.usdt).toFixed(2)} USDT` : money(stars)
 
   const commit = useCallback((f: (s: Save) => Save) => {
+    if (savedElsewhere()) { const fresh = loadSave(); markLoaded(); setCatalog(fresh.catalog); S.current = fresh } // другая вкладка уже сохранила более свежее состояние: работаем поверх него
     const next = f(S.current)
     if (next.catalog !== S.current.catalog) setCatalog(next.catalog)
     S.current = next
@@ -241,6 +275,7 @@ export default function App() {
 
   const beep = useCallback((f: number, _ms?: number) => { if (f < 300) play.lose(); else if (f > 800) play.coin(); else play.click() }, [])
 
+  const lastStake = useRef(0)
   const ctx: Ctx = useMemo(() => {
     const tx = (title: string, amount: number): Tx => ({ id: uid(), title, amount, date: dateNow() })
     return {
@@ -248,28 +283,38 @@ export default function App() {
       notify: setNotice,
       charge: (cost, title, countRound = true) => {
         if (!(cost > 0) || !Number.isFinite(cost)) return false
+        lastStake.current = cost
+        if (pendingBet.current) setStreak(0) // предыдущая ставка осталась без выигрыша
+        pendingBet.current = true
         if (S.current.balance < cost) { setNotice('Не хватает звёзд'); beep(150, 200); return false }
         commit(s => ({
           ...s, balance: s.balance - cost, xp: (s.xp || 0) + (countRound ? betXp(cost) : 0),
           tx: [tx(title, -cost), ...s.tx].slice(0, 60),
           stats: { ...s.stats, rounds: (s.stats.rounds || 0) + (countRound ? 1 : 0), gStaked: (s.stats.gStaked || 0) + (GAME_TITLE.test(title) ? cost : 0) },
         }))
+        if (GAME_TITLE.test(title)) track('bet', title.replace(/\s*[—:-].*$/, ''), cost)
         beep(380, 80)
         return true
       },
       pay: (amount, title) => {
         if (!(amount > 0)) return
         commit(s => ({ ...s, balance: s.balance + amount, tx: [tx(title, amount), ...s.tx].slice(0, 60), stats: { ...s.stats, gPaid: (s.stats.gPaid || 0) + (GAME_TITLE.test(title) ? amount : 0) } }))
+        if (GAME_TITLE.test(title)) track('win', title.replace(/\s*[—:-].*$/, ''), amount)
+        else track('sale', 'Продажа подарков', amount)
+        if (GAME_TITLE.test(title)) { if (amount >= lastStake.current) setStreak(n => n + 1); else setStreak(0); pendingBet.current = false }
         setConfetti(c => c + 1); setNotice(`${title}: +${cfmt(amount)}`); beep(880, 220)
+        if (GAME_TITLE.test(title)) { const st = lastStake.current; window.dispatchEvent(new CustomEvent('qcup-win', { detail: { amount, mult: st > 0 ? amount / st : 2, game: title.replace(/\s*[—:-].*$/, '') } })) }
       },
       addGift: (kind, title) => {
         const gift: GiftT = { uid: uid(), kind, num: S.current.nextNum }
-        commit(s => ({ ...s, gifts: [...s.gifts, gift], nextNum: s.nextNum + 1 + Math.floor(Math.random() * 40), tx: [tx(`${title}: ${GIFTS[kind]?.name}`, 0), ...s.tx].slice(0, 60) }))
+        setStreak(n => n + 1); pendingBet.current = false
+        commit(s => ({ ...s, seen: { ...(s.seen || {}), [kind]: true }, gifts: [...s.gifts, gift], nextNum: s.nextNum + 1 + Math.floor(Math.random() * 40), tx: [tx(`${title}: ${GIFTS[kind]?.name}`, 0), ...s.tx].slice(0, 60) }))
         setConfetti(c => c + 1); beep(988, 260)
+        window.dispatchEvent(new CustomEvent('qcup-gift', { detail: { kind, game: title.replace(/\s*[—:-].*$/, '') } }))
         return gift
       },
       removeGift: id => commit(s => ({ ...s, gifts: s.gifts.filter(g => g.uid !== id) })),
-      tally: (staked, paid) => commit(s => ({ ...s, stats: { ...s.stats, gStaked: (s.stats.gStaked || 0) + staked, gPaid: (s.stats.gPaid || 0) + paid } })),
+      tally: (staked, paid) => { if (staked > 0) track('bet', 'Игры', staked); if (paid > 0) track('win', 'Игры', paid); commit(s => ({ ...s, stats: { ...s.stats, gStaked: (s.stats.gStaked || 0) + staked, gPaid: (s.stats.gPaid || 0) + paid } })) },
       tilt: () => 0, // подкрутки под игрока больше нет: везде честные шансы, преимущество казино заложено в таблицы выплат
       bump: key => commit(s => ({ ...s, stats: { ...s.stats, [key]: (s.stats[key] || 0) + 1 } })),
     }
@@ -277,6 +322,16 @@ export default function App() {
 
   const openGame = (id: GameId, seedUid: string | null = null) => { setSeed(seedUid); setGame(id) }
   const dailyReady = save.daily.last !== todayKey()
+  const yday = new Date(Date.now() - 864e5).toISOString().slice(0, 10)
+  const chain = save.daily.last === todayKey() || save.daily.last === yday ? save.daily.streak : 0 // сколько дней подряд уже отмечено
+  const dailyDone = dailyReady ? chain % 7 : chain
+  const dailyNext = dailyReady ? (chain % 7) + 1 : chain
+  // коллекция: подарки, которые уже были у игрока (в том числе проданные и сгоревшие)
+  const seenSet = useMemo(() => new Set([...Object.keys(save.seen || {}), ...save.gifts.map(g => g.kind)]), [save.seen, save.gifts])
+  useEffect(() => {
+    const miss = save.gifts.filter(g => !(save.seen || {})[g.kind])
+    if (miss.length) commit(s => ({ ...s, seen: { ...(s.seen || {}), ...Object.fromEntries(s.gifts.map(g => [g.kind, true])) } }))
+  }, [save.gifts, save.seen, commit])
 
   // ---- маркет ----
   const buy = (k: GiftKind) => {
@@ -285,7 +340,7 @@ export default function App() {
     ctx.charge(price, `Покупка: ${GIFTS[k]?.name}`, false)
     ctx.bump('trades')
     const g = ctx.addGift(k, 'Покупка')
-    setNotice(`Куплено: ${GIFTS[k]?.name} #${g.num}`)
+    setNotice(`Куплено: ${GIFTS[k]?.name}`)
   }
   const sell = (g: GiftT) => {
     const price = Math.floor(S.current.prices[g.kind] * SELL_RATE)
@@ -298,8 +353,16 @@ export default function App() {
     if (!dailyReady) return
     const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10)
     const streak = save.daily.last === yesterday ? (save.daily.streak % 7) + 1 : 1
-    commit(s => ({ ...s, daily: { last: todayKey(), streak }, xp: (s.xp || 0) + DAILY_XP }))
-    setNotice(`Ежедневный вход: день ${streak} из 7`)
+    const bonus = DAILY_STARS[streak - 1] || 1
+    track('bonus', 'Ежедневный вход', bonus)
+    commit(s => ({ ...s, daily: { last: todayKey(), streak }, balance: s.balance + bonus, xp: (s.xp || 0) + DAILY_XP, tx: [{ id: uid(), title: `Ежедневный вход · день ${streak}`, amount: bonus, date: dateNow() }, ...s.tx].slice(0, 60) }))
+    if (streak === 7) { // награда за неделю подряд: редкий (коллекционный) подарок средней цены
+      const pool = GIFT_ORDER.filter(k => GIFTS[k]?.nft && GIFTS[k].base >= 500 && GIFTS[k].base <= 3000)
+      const kind = pool.length ? pool[Math.floor(Math.random() * pool.length)] : GIFT_ORDER.find(k => GIFTS[k]?.nft) || GIFT_ORDER[GIFT_ORDER.length - 1]
+      if (kind) { ctx.addGift(kind, 'Награда за 7 дней'); setNotice(`7 дней подряд: ${GIFTS[kind]?.name} и +${cfmt(bonus)}`); return }
+    }
+    play.coin(); window.dispatchEvent(new CustomEvent('qcup-fx', { detail: 40 }))
+    setNotice(`Ежедневный вход: день ${streak} из 7 · +${cfmt(bonus)}`)
   }
   const claimTask = (t: (typeof TASKS)[number]) => {
     if (save.tasks[t.id] || (save.stats[t.stat] || 0) < t.target) return
@@ -314,16 +377,32 @@ export default function App() {
     setNotice(`Достижение: ${fresh[0].title} · +${fresh[0].xp} XP${fresh.length > 1 ? ` (и ещё ${fresh.length - 1})` : ''}`)
   }, [save.stats, save.ach, commit])
   const lvl = levelInfo(save.xp || 0)
+
+  // Вывод (тестовый): монеты списываются при заявке и возвращаются, если заявку отклонили
+  const reserveWd = useCallback((coins: number) => {
+    if (!(coins > 0) || S.current.balance < coins) return false
+    commit(s => ({ ...s, balance: s.balance - coins, tx: [{ id: uid(), title: 'Вывод: заявка', amount: -coins, date: dateNow() }, ...s.tx].slice(0, 60) }))
+    return true
+  }, [commit])
+  const refundWd = useCallback((coins: number, title: string) => {
+    commit(s => ({ ...s, balance: s.balance + coins, tx: [{ id: uid(), title, amount: coins, date: dateNow() }, ...s.tx].slice(0, 60) }))
+    setNotice(`${title}: +${cfmt(coins)}`)
+  }, [commit])
+  useWithdrawRetry(refundWd)
+  useEffect(() => { loadWithdrawCfg().then(setWdCfg) }, [])
+  // история игр уходит на сервер пачками: раз в 20 секунд и когда игрок сворачивает игру
+  useEffect(() => {
+    const f = () => flushSync({ balance: S.current.balance, level: levelInfo(S.current.xp || 0).level })
+    const t = window.setInterval(f, 20_000)
+    const v = () => { if (document.visibilityState === 'hidden') f() }
+    document.addEventListener('visibilitychange', v); f()
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', v) }
+  }, [])
   const lvlRef = useRef(lvl.level)
   useEffect(() => {
-    if (lvl.level > lvlRef.current) setNotice(`Новый уровень: ${lvl.level} · ${rankOf(lvl.level)}`)
+    if (lvl.level > lvlRef.current) { setLvlUp(lvl.level); play.big(); window.dispatchEvent(new CustomEvent('qcup-fx', { detail: 120 })) }
     lvlRef.current = lvl.level
   }, [lvl.level])
-  const reset = () => {
-    if (!window.confirm('Сбросить весь прогресс?')) return
-    const d = defaultSave(); S.current = d; setSave(d); persist(d); setNotice('Прогресс сброшен')
-  }
-
   const view = (g: GameId) => {
     switch (g) {
       case 'rocket': return <Crash ctx={ctx} />
@@ -352,16 +431,14 @@ export default function App() {
   const header = (
     <header className="topbar">
       {game
-        ? <button className="back-btn" onClick={() => setGame(null)} aria-label="Назад"><ChevronLeft size={20} /><span>{TITLES[game]}</span></button>
-        : <button className="brand" onClick={() => setTab('Игры')}><span className="brand-word">Qc<span>Up</span></span></button>}
+        ? <button className="back-btn" onClick={() => setGame(null)} aria-label="Назад"><ChevronLeft size={20} /><span className="back-text"><span className="brand-word"><Logotype v="flat" h={18} /></span><small>{TITLES[game]}</small></span></button>
+        : <button className="brand" onClick={() => setTab('Игры')}><span className="brand-word"><Logotype v="flat" h={20} /></span></button>}
       <div className="top-actions">
         {DEMO && <span className="demo-badge">ДЕМО</span>}
-        {!game && (DEMO
-          ? <button className="dep-btn" onClick={() => { commit(s => ({ ...s, balance: s.balance + 10000, tx: [{ id: uid(), title: 'Демо-пополнение', amount: 10000, date: dateNow() }, ...s.tx].slice(0, 60) })); setNotice('Демо: +10 000 ⭐') }}><Plus size={15} />+10 000</button>
-          : <button className="dep-btn" onClick={() => setDepositOpen(true)}><Plus size={15} />Пополнить</button>)}
+        {!game && <button className="dep-btn" onClick={() => setDepositOpen(true)}><Plus size={15} />Пополнить</button>}
         <button className="settings-btn" aria-label="Звук" onClick={() => setSound(s => !s)}>{sound ? <Volume2 size={16} /> : <VolumeX size={16} />}</button>
         <div className="cur-wrap">
-          <button className="balance-pill" onClick={() => setCurMenu(o => !o)} aria-haspopup="menu" aria-expanded={curMenu}>{cur === 'TON' && rates ? <TonIcon size={18} /> : cur === 'USDT' && rates ? <UsdtIcon size={18} /> : <Coin />}<b>{fmtBal(save.balance)}</b><span className="cur-caret">▾</span></button>
+          <button key={delta?.id ?? 0} className={`balance-pill${delta ? (delta.v > 0 ? ' bump-up' : ' bump-down') : ''}`} onClick={() => setCurMenu(o => !o)} aria-haspopup="menu" aria-expanded={curMenu}>{cur === 'TON' && rates ? <TonIcon size={18} /> : cur === 'USDT' && rates ? <UsdtIcon size={18} /> : <Coin />}<b>{fmtBal(save.balance)}</b><span className="cur-caret">▾</span>{delta && <span key={delta.id} className={`bal-delta ${delta.v > 0 ? 'up' : 'down'}`}>{delta.v > 0 ? '+' : '−'}{cfmt(Math.abs(delta.v))}</span>}</button>
           {curMenu && <><div className="cur-back" onClick={() => setCurMenu(false)} /><div className="cur-menu" role="menu">
             {([['STAR', 'Звёзды', <Coin size={18} />], ['TON', 'TON', <TonIcon size={18} />], ['USDT', 'USDT', <UsdtIcon size={18} />]] as ['STAR' | 'TON' | 'USDT', string, ReactNode][]).map(([k, t, ic]) =>
               <button key={k} role="menuitem" className={`cur-item ${cur === k ? 'on' : ''}`} onClick={() => pickCur(k)}>{ic}<span>{t}</span>{cur === k && <em>✓</em>}</button>)}
@@ -386,10 +463,8 @@ export default function App() {
       {view(game)}
     </section> : <>
       {tab === 'Игры' && <>
-        <button className={`daily-banner ${dailyReady ? 'ready' : ''}`} onClick={() => setTab('Задания')}>
-          <div><b>Ежедневный вход</b><span>{dailyReady ? 'Отметь визит' : 'Отмечено, приходи завтра'} · день {Math.max(1, save.daily.streak)} из 7</span></div>
-          <i>{dailyReady ? 'Отметить' : '✓'}</i>
-        </button>
+        <DailyStrip stars={DAILY_STARS} done={dailyDone} ready={dailyReady} nextDay={dailyNext} onClaim={claimDaily} onOpen={() => setTab('Задания')} />
+        <LiveFeed myName={displayName} />
         <section className="game-grid">
           {games.map(g => (
             <button className={`game-card${g.soon ? ' coming' : ''}`} key={g.id} onClick={() => g.soon ? setNotice('Этот режим скоро появится') : g.id === 'cases' ? setTab('Кейсы') : openGame(g.id)}>
@@ -451,7 +526,8 @@ export default function App() {
       </section>}
 
       {tab === 'Профиль' && <section className="page-section">
-        <div className="profile-head"><div className="profile-avatar">{user?.photo_url ? <img src={user.photo_url} alt="" /> : displayName.slice(0, 1).toUpperCase()}</div>
+        <div className="profile-head"><div className="ava-col"><div className="profile-avatar">{user?.photo_url ? <img src={user.photo_url} alt="" /> : displayName.slice(0, 1).toUpperCase()}</div>
+            <div className="ava-xp" title={`Уровень ${lvl.level}`}><i style={{ width: `${Math.round(lvl.pct * 100)}%` }} /></div><small>Ур. {lvl.level}</small></div>
           <div><h1>{displayName}</h1><p className="muted">{user?.username ? '@' + user.username : 'Гость'}</p></div></div>
         <div className="lvl-card">
           <div className="lvl-top"><div className="lvl-badge">{lvl.level}</div>
@@ -459,6 +535,10 @@ export default function App() {
           <div className="lvl-bar"><i style={{ width: `${Math.round(lvl.pct * 100)}%` }} /></div>
           <p className="m small">Опыт: ставки (+2 за раунд и ещё за каждые 25 ⭐), задания +{TASK_XP}, ежедневный вход +{DAILY_XP}, достижения. Наград за уровни пока нет.</p>
         </div>
+        <Collection kinds={GIFT_ORDER} seen={seenSet} names={k => GIFTS[k]?.name || k} />
+        <LookCard theme={theme} onTheme={setTheme} haptic={hapticOn} onHaptic={v => { setHaptic(v); setHapticOn(v) }} />
+        {wdCfg && <button className="wd-btn" onClick={() => setWdOpen(true)}><span><b>Вывод средств</b><small>Тестовый режим: заявку проверяет администратор</small></span><i>Вывести</i></button>}
+        <ReferralCard onNotice={setNotice} />
         <div className="stats-row">
           <div><b>{fmtBal(save.balance)}</b><small>{cur === 'STAR' ? 'Звёзды' : 'Баланс'}</small></div>
           <div><b>{save.gifts.length}</b><small>Подарков</small></div>
@@ -481,7 +561,6 @@ export default function App() {
             <button className="danger" onClick={() => { commit(s => ({ ...s, balance: 0 })); setNotice('Баланс обнулён') }}>Обнулить</button>
           </div>
         </div>}
-        <button className="outline-btn" onClick={reset}>Сбросить прогресс</button>
       </section>}
 
       <nav className="bottom-nav">{tabs.map(({ label, icon: Icon }) =>
@@ -491,6 +570,11 @@ export default function App() {
     </>}
 
     {depositOpen && <DepositModal onClose={() => setDepositOpen(false)} onNotice={setNotice} />}
+    {wdOpen && wdCfg && <WithdrawModal cfg={wdCfg} balance={save.balance} onClose={() => setWdOpen(false)} onReserve={reserveWd} onRefund={refundWd} onNotice={setNotice} />}
+    <BrandDefs />
+    <FxConfetti />
+    <StreakChip n={streak} />
+    {lvlUp !== null && <LevelUp level={lvlUp} rank={rankOf(lvlUp)} onClose={() => setLvlUp(null)} />}
     {notice && <button className="toast" onClick={() => setNotice('')}>{notice}<X size={15} /></button>}
     <Confetti count={confetti} key={confetti} />
   </main>
@@ -522,7 +606,7 @@ function GiftsTab({ save, ctx, onBuy, onSell, onUpgrade }: { save: Save; ctx: Ct
       {!save.gifts.length && <div className="empty-history">Пока пусто. Загляни на маркет или открой кейс.</div>}
       {save.gifts.map(g => <div className="gift-row" key={g.uid}>
         <GiftArt kind={g.kind} size={48} />
-        <div><b>{GIFTS[g.kind]?.name} #{g.num}</b><small>{GIFTS[g.kind].rarity}</small></div>
+        <div><b>{GIFTS[g.kind]?.name}</b><small>{GIFTS[g.kind].rarity}</small></div>
         <div className="gift-act"><strong>{cfmt(save.prices[g.kind])}</strong>
           <span><button onClick={() => onUpgrade(g.uid)}>Апгрейд</button><button onClick={() => onSell(g)}>Продать</button></span></div>
       </div>)}

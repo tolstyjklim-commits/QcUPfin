@@ -113,7 +113,29 @@ async function credit(prisma: PrismaClient, dep: Dep | null, paid: bigint, hash:
     await tx.transaction.create({ data: { userId: dep.userId, amount: coins, type: dep.asset === 'STARS' ? 'deposit_stars' : dep.asset === 'USDT' ? 'deposit_usdt' : 'deposit_ton', status: 'done', description: dep.asset === 'STARS' ? `Stars ${paid}` : dep.asset === 'USDT' ? `USDT ${Number(paid) / 1e6}` : `TON ${Number(paid) / 1e9}` } })
     return true
   })
-  if (ok) plog('deposit_credited', { memo: dep.memo, asset: dep.asset, userId: dep.userId, paid, coins, rate: r, tx: hash })
+  if (ok) {
+    plog('deposit_credited', { memo: dep.memo, asset: dep.asset, userId: dep.userId, paid, coins, rate: r, tx: hash })
+    await awardReferral(prisma, dep.userId, dep.id, coins)
+  }
+}
+
+// Реферальный бонус пригласившему: REF_PERCENT % от каждого зачисленного пополнения друга (0 отключает).
+// Делается отдельно от зачисления: сбой здесь не должен отменить платёж. Идемпотентно: memo и txHash бонуса уникальны для заявки.
+async function awardReferral(prisma: PrismaClient, userId: string, depId: string, coins: bigint) {
+  try {
+    const pct = Math.max(0, Math.min(50, Number(process.env.REF_PERCENT ?? 5)))
+    if (!(pct > 0)) return
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { referredById: true } })
+    if (!u?.referredById) return
+    const bonus = (coins * BigInt(Math.round(pct * 100))) / 10_000n
+    if (bonus <= 0n) return
+    await prisma.$transaction(async tx => {
+      await tx.deposit.create({ data: { userId: u.referredById!, asset: 'REF', memo: `ref-${depId}`, coins: bonus, txHash: `ref:${depId}`, status: 'credited', expiresAt: new Date(), creditedAt: new Date() } })
+      await tx.wallet.updateMany({ where: { userId: u.referredById! }, data: { balance: { increment: bonus } } })
+      await tx.transaction.create({ data: { userId: u.referredById!, amount: bonus, type: 'referral', status: 'done', description: `Реферальный бонус ${pct}%` } })
+    })
+    plog('referral_bonus', { depId, inviter: u.referredById, bonus, pct })
+  } catch (e) { if (!/Unique constraint/i.test((e as Error).message)) plog('referral_error', { depId, error: (e as Error).message }, 'warn') }
 }
 
 // Адрес вида EQ…/UQ… -> «сырой» 0:hex, как отдаёт toncenter v3

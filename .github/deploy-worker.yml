@@ -66,6 +66,27 @@ jobs:
           W=$(openssl rand -hex 24); echo "::add-mask::$W"; echo "WEBHOOK_SECRET=$W" >> "$GITHUB_ENV"
           echo "Сайт: $WEB" | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # кассы @send, @wallet, @xRocket: передаём Worker только те секреты, которые заданы в GitHub (пустые пропускаем)
+      - name: Payment providers (optional)
+        id: pay
+        env:
+          SEND_TOKEN: ${{ secrets.SEND_TOKEN }}
+          WALLET_API_KEY: ${{ secrets.WALLET_API_KEY }}
+          XROCKET_TOKEN: ${{ secrets.XROCKET_TOKEN }}
+          PAY_HOOK_KEY: ${{ secrets.PAY_HOOK_KEY }}
+          GITHUB_TOKEN_DATA: ${{ secrets.DATA_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          L=""
+          for v in SEND_TOKEN WALLET_API_KEY XROCKET_TOKEN PAY_HOOK_KEY; do
+            if [ -n "${!v}" ]; then L="$L$v"$'\n'; fi
+          done
+          if [ -n "$GITHUB_TOKEN_DATA" ]; then L="${L}GITHUB_TOKEN"$'\n'; echo "Зеркало данных в GitHub: включено" >> "$GITHUB_STEP_SUMMARY"; fi
+          { echo "list<<EOF"; printf '%s' "$L"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+          [ -n "$SEND_TOKEN" ] && echo "Касса @send: включена" >> "$GITHUB_STEP_SUMMARY" || true
+          [ -n "$WALLET_API_KEY" ] && echo "Касса @wallet: включена" >> "$GITHUB_STEP_SUMMARY" || true
+          [ -n "$XROCKET_TOKEN" ] && echo "Касса @xRocket: включена" >> "$GITHUB_STEP_SUMMARY" || true
+
       - name: Deploy to Cloudflare
         id: deploy
         uses: cloudflare/wrangler-action@v3
@@ -77,10 +98,16 @@ jobs:
             BOT_TOKEN
             WEBHOOK_SECRET
             ADMIN_KEY
+            ${{ steps.pay.outputs.list }}
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           WEBHOOK_SECRET: ${{ env.WEBHOOK_SECRET }}
           ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
+          SEND_TOKEN: ${{ secrets.SEND_TOKEN }}
+          WALLET_API_KEY: ${{ secrets.WALLET_API_KEY }}
+          XROCKET_TOKEN: ${{ secrets.XROCKET_TOKEN }}
+          PAY_HOOK_KEY: ${{ secrets.PAY_HOOK_KEY }}
+          GITHUB_TOKEN: ${{ secrets.DATA_GITHUB_TOKEN }}
 
       - name: Connect the bot
         env:

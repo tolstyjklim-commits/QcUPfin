@@ -110,7 +110,7 @@ export function Crash({ ctx }: { ctx: Ctx }) {
     const launch = () => {
     play.whoosh()
     const L = live.current
-    L.crashAt = Math.max(1, Math.floor((1 + (crashPoint() - 1) * (1 - ctx.tilt())) * 100) / 100); L.auto = auto; L.stake = st; L.t0 = performance.now(); L.phase = 'fly'; L.mult = 1
+    L.crashAt = Math.max(1.01, Math.floor((1 + (crashPoint() - 1) * (1 - ctx.tilt())) * 100) / 100); L.auto = auto; L.stake = st; L.t0 = performance.now(); L.phase = 'fly'; L.mult = 1
     setPhase('fly'); setMult(1); setWin(0)
     const tick = (now: number) => {
       if (L.phase !== 'fly') return
@@ -161,6 +161,7 @@ export function Crash({ ctx }: { ctx: Ctx }) {
 
 // ---------- АПГРЕЙД ПОДАРКОВ (можно отдать сразу несколько) ----------
 const MAX_UPG = 12
+const UPG_STARS_MAX = 0.75 // максимальный шанс, если в апгрейд поставлены звёзды
 export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
   const gifts = ctx.save.gifts
   const prices = ctx.save.prices
@@ -171,19 +172,25 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
   const [target, setTarget] = useState<GiftKind | null>(null)
   const [rot, setRot] = useState(0)
   const [spinning, setSpinning] = useState(false)
+  const [useStars, setUseStars] = useState(false) // добавить к ставке звёзды со счёта
+  const [starStake, setStarStake] = useState(100)
   const [res, setRes] = useState<{ ok: boolean; text: string } | null>(null)
   const [fx, setFx] = useState<'win' | 'burn' | null>(null)
   const needle = useRef<SVGGElement>(null)
   const chosen = useMemo(() => sel.map(id => gifts.find(g => g.uid === id)).filter((g): g is Gift => !!g), [sel, gifts])
-  const curPrice = chosen.reduce((a, g) => a + (prices[g.kind] || 0), 0) // цена всех выбранных подарков вместе
-  const has = chosen.length > 0
+  const lockedStars = useRef(0) // на время прокрутки сумма звёзд фиксируется, иначе она менялась бы вместе с балансом
+  const stars = spinning ? lockedStars.current : useStars ? Math.max(0, Math.min(Math.floor(starStake) || 0, ctx.save.balance, MAX_BET)) : 0
+  const curPrice = chosen.reduce((a, g) => a + (prices[g.kind] || 0), 0) + stars // подарки и звёзды вместе
+  const has = chosen.length > 0 || stars > 0
+  // если в ставку входят звёзды, шанс успеха не выше 75%
+  const chanceFor = (t: GiftKind) => { const c = upgradeChance(curPrice, prices[t]); return stars > 0 ? Math.min(UPG_STARS_MAX, c) : c }
 
   // все подарки дороже суммы выбранных (в том числе с очень малым шансом, например обычный → редкий NFT)
   const allTargets = useMemo(() =>
     has ? GIFT_ORDER.filter(k => prices[k] > curPrice * 1.05) : [],
     [has, curPrice, prices])
   // быстрые кнопки: ближайшие цели с заметным шансом
-  const targets = useMemo(() => allTargets.filter(k => upgradeChance(curPrice, prices[k]) >= 0.02).slice(0, 16), [allTargets, curPrice, prices])
+  const targets = useMemo(() => allTargets.filter(k => chanceFor(k) >= 0.02).slice(0, 16), [allTargets, curPrice, prices])
   useEffect(() => {
     if (!allTargets.length) setTarget(null)
     else if (!target || !allTargets.includes(target)) {
@@ -206,13 +213,15 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
     return () => cancelAnimationFrame(raf)
   }, [spinning])
 
-  const chance = has && target ? upgradeChance(curPrice, prices[target]) : 0
+  const chance = has && target ? chanceFor(target) : 0
   const mult = has && target ? prices[target] / curPrice : 0
   const R = 78, C = 2 * Math.PI * R
   const toggle = (id: string) => { setSel(s => (s.includes(id) ? s.filter(i => i !== id) : s.length >= MAX_UPG ? s : [...s, id])); setRes(null); setFx(null); play.click() }
 
   const go = () => {
     if (!has || !target || spinning) return
+    if (stars > 0 && !ctx.charge(stars, 'Апгрейд — ставка звёздами')) return // звёзды списываются до прокрутки
+    lockedStars.current = stars
     const ok = rnd() < chance // шанс ровно тот, что показан на циферблате
     ctx.tally(curPrice, ok ? prices[target] : 0)
     const zone = chance * 360
@@ -222,15 +231,16 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
     setSpinning(true); setRes(null); setFx(null); setRot(next); play.whoosh()
     window.setTimeout(() => {
       give.forEach(g => ctx.removeGift(g.uid))
+      setUseStars(false)
       ctx.bump('upgrades')
       if (ok) {
         const g = ctx.addGift(tgt, 'Апгрейд — успех')
-        ctx.notify(`Апгрейд удался: ${GIFTS[tgt]?.name} #${g.num}`)
-        setRes({ ok: true, text: `Получено: ${GIFTS[tgt]?.name} #${g.num}` })
-        setSel([g.uid]); setFx('win'); play.big()
+        ctx.notify(`Апгрейд удался: ${GIFTS[tgt]?.name}`)
+        setRes({ ok: true, text: `Получено: ${GIFTS[tgt]?.name}` })
+        setSel([g.uid]); setFx('win'); play.big(); window.dispatchEvent(new CustomEvent('qcup-fx', { detail: 100 }))
       } else {
-        ctx.notify(give.length > 1 ? 'Не повезло, подарки сгорели' : 'Не повезло, подарок сгорел')
-        setRes({ ok: false, text: give.length > 1 ? `${give.length} подарков сгорели (${cfmt(curPrice)})` : `${GIFTS[give[0].kind]?.name} #${give[0].num} сгорел` })
+        ctx.notify(give.length > 1 || stars > 0 ? 'Не повезло, ставка сгорела' : 'Не повезло, подарок сгорел')
+        setRes({ ok: false, text: !give.length ? `Ставка ${cfmt(curPrice)} сгорела` : give.length > 1 || stars > 0 ? `Сгорело: ${give.length ? `${give.length} подарк.` : ''}${give.length && stars ? ' и ' : ''}${stars ? cfmt(stars) : ''}` : `${GIFTS[give[0].kind]?.name} сгорел` })
         setSel([]); setFx('burn'); play.lose(); play.boom()
       }
       setSpinning(false)
@@ -247,17 +257,20 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
   const ticks = Array.from({ length: 60 }, (_, i) => i)
   const first = chosen[0]
   return (
-    <div className="upg">
+    <div className={`upg ${useStars ? 'sw' : ''}`}>
       <div className="upg-pair">
         <div className={`upg-slot ${fx === 'burn' ? 'burn' : ''}`}>
           <span className="m small">Отдаёшь{chosen.length > 1 ? ` · ${chosen.length}` : ''}</span>
-          {has
+          {has && !chosen.length
+            ? <div className="slot-btn" style={{ cursor: 'default' }}><Coin size={72} /><b>Ставка звёздами</b><span className="gold">{cfmt(stars)}</span></div>
+            : has
             ? <button className="slot-btn" disabled={spinning} onClick={() => { setPtab('mine'); setPicker(true) }}>
               {chosen.length === 1
                 ? <GiftArt kind={first.kind} size={88} />
                 : <div className="upg-stack">{chosen.slice(0, 4).map((g, i) => <span key={g.uid} style={{ ['--i' as string]: i }}><GiftArt kind={g.kind} size={52} glow={false} /></span>)}{chosen.length > 4 && <em>+{chosen.length - 4}</em>}</div>}
-              <b>{chosen.length === 1 ? `${GIFTS[first.kind]?.name} #${first.num}` : `${chosen.length} подарков`}</b>
+              <b>{chosen.length === 1 ? `${GIFTS[first.kind]?.name}` : `${chosen.length} подарков`}</b>
               <span className="gold">{cfmt(curPrice)}</span>
+              {stars > 0 && <i className="m small">в том числе {cfmt(stars)} звёздами</i>}
             </button>
             : <button className="slot-plus" disabled={spinning} onClick={() => { setPtab(gifts.length ? 'mine' : 'market'); setPicker(true) }} aria-label="Выбрать подарок"><span>+</span><b className="m small">{fx === 'burn' ? 'Сгорели. Выбери новые' : 'Выбрать подарки'}</b></button>}
           {fx === 'burn' && <Burst key="b" type="ember" n={60} />}
@@ -268,6 +281,26 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
           {target ? <><GiftArt kind={target} size={88} animate={fx === 'win'} /><b>{GIFTS[target]?.name}</b><span className="gold">≈ {cfmt(prices[target])}</span></> : <b className="m">{has ? 'Выше нет' : '—'}</b>}
           {fx === 'win' && <Burst key="w" type="gold" n={90} />}
         </div>
+      </div>
+
+      <div className={`upg-stars ${useStars ? 'on' : ''}`}>
+        <button className="upg-stars-head" disabled={spinning} aria-pressed={useStars} onClick={() => { setUseStars(v => !v); setRes(null); play.click() }}>
+          <Coin size={22} />
+          <span><b>Добавить звёзды в ставку</b><i>{useStars ? `В ставке ${cfmt(stars)} · шанс не выше 75%` : 'Баланс вместе с подарками, шанс до 75%'}</i></span>
+          <em className="sw" aria-hidden="true" />
+        </button>
+        {useStars && <div className="upg-stars-body">
+          <div className="cur-seg" role="radiogroup" aria-label="Валюта ставки">
+            {(['STAR', 'TON', 'USDT'] as const).map(c => {
+              const off = (c === 'TON' && !DISP.ton) || (c === 'USDT' && !DISP.usdt)
+              return <button key={c} role="radio" aria-checked={dispCur() === c} disabled={spinning || off} className={dispCur() === c ? 'on' : ''}
+                onClick={() => { window.dispatchEvent(new CustomEvent('qcup-cur', { detail: c })); play.click() }}>
+                {c === 'TON' ? <TonIcon size={16} /> : c === 'USDT' ? <UsdtIcon size={16} /> : <Coin size={16} />}{c === 'STAR' ? 'Звёзды' : c}
+              </button>
+            })}
+          </div>
+          <StakeInput value={starStake} onChange={setStarStake} balance={ctx.save.balance} disabled={spinning} presets={[100, 500, 1000, 5000]} />
+        </div>}
       </div>
 
       {has && gifts.length > chosen.length && !spinning && chosen.length < MAX_UPG && <button className="upg-add" onClick={() => { setPtab('mine'); setPicker(true) }}>+ Добавить ещё подарки: шанс растёт вместе с суммой</button>}
@@ -282,7 +315,7 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
         {has && allTargets.length > 0 && <button disabled={spinning} className="more" onClick={() => { setTpicker(true); play.click() }}>Все цели · {allTargets.length}</button>}
       </div>
 
-      <div className={`dial ${spinning ? 'spinning' : ''}`}>
+      <div className={`dial ${spinning ? 'spinning' : ''} ${fx === 'win' ? 'flash-win' : fx === 'burn' ? 'flash-lose' : ''}`}>
         <svg width="220" height="220" viewBox="0 0 210 210" role="img" aria-label={`Шанс успеха ${pct(chance)}%`}>
           <defs>
             <linearGradient id="arcg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#59b58d" /><stop offset="1" stopColor="#9ad2b8" /></linearGradient>
@@ -303,10 +336,12 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
       </div>
 
       {res && <Result good={res.ok}>{res.text}</Result>}
-      <button className="cta" disabled={!has || !target || spinning} onClick={go}>
-        {spinning ? <><RotateCcw size={18} className="spin-icon" /> Крутится…</> : chosen.length > 1 ? `Апгрейд · ${chosen.length} подарков` : 'Апгрейд'}
-      </button>
-      <p className="m small center">Если не повезёт, все выбранные подарки сгорят. Подарки существуют только внутри игры.</p>
+      <div className="upg-cta">
+        <button className="cta" disabled={!has || !target || spinning} onClick={go}>
+          {spinning ? <><RotateCcw size={18} className="spin-icon" /> Крутится…</> : chosen.length > 1 ? `Апгрейд · ${chosen.length} подарков` : 'Апгрейд'}
+        </button>
+        <p className="m small center">Если не повезёт, вся ставка сгорит. Подарки существуют только внутри игры.</p>
+      </div>
 
       {tpicker && has && (
         <div className="sheet-bg" onClick={() => setTpicker(false)}>
@@ -314,7 +349,7 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
             <div className="sheet-tabs"><button className="on">Во что улучшить · {allTargets.length}</button></div>
             <p className="m small center">Чем дороже подарок, тем меньше шанс. Можно сразу прыгнуть на редкий, но шанс будет совсем мизерным.</p>
             <div className="sheet-list">
-              {allTargets.map(k => { const c = upgradeChance(curPrice, prices[k]); return (
+              {allTargets.map(k => { const c = chanceFor(k); return (
                 <button key={k} className={k === target ? 'on' : ''} onClick={() => { setTarget(k); setTpicker(false); setRes(null); play.click() }}>
                   <GiftArt kind={k} size={44} glow={false} />
                   <span><b>{GIFTS[k]?.name}{GIFTS[k]?.nft ? ' · редкий' : ''}</b><i>{cfmt(prices[k])} · ×{(prices[k] / curPrice).toFixed(1).replace('.', ',')}</i></span>
@@ -337,7 +372,7 @@ export function Upgrade({ ctx, seed }: { ctx: Ctx; seed: string | null }) {
               {ptab === 'mine' && (gifts.length
                 ? gifts.map(x => (
                   <button key={x.uid} className={sel.includes(x.uid) ? 'on' : ''} onClick={() => toggle(x.uid)}>
-                    <GiftArt kind={x.kind} size={44} glow={false} /><span><b>{GIFTS[x.kind]?.name} #{x.num}</b><i>{cfmt(prices[x.kind])}</i></span>
+                    <GiftArt kind={x.kind} size={44} glow={false} /><span><b>{GIFTS[x.kind]?.name}</b><i>{cfmt(prices[x.kind])}</i></span>
                     <em className="chk">{sel.includes(x.uid) ? '✓' : ''}</em>
                   </button>))
                 : <p className="m small center">Подарков пока нет. Купи на маркете.</p>)}
@@ -422,7 +457,7 @@ export function Storm({ ctx }: { ctx: Ctx }) {
           ))}
           {win > 0 && <Burst key={win} type="gold" n={80} />}
         </div>
-      </div>
+        </div>
       <details className="paytable"><summary>Таблица выплат</summary>
         <div className="pt-grid">{SYMBOLS.map(sy => <div key={sy}><span className="pt-sym"><SlotSym s={sy} /></span><small>3 · ×{STORM_PAY(sy, 3)}</small><small>4 · ×{STORM_PAY(sy, 4)}</small><small>5 · ×{STORM_PAY(sy, 5)}</small></div>)}</div>
         <p className="m small">Множители на ставку линии (ставка делится на 9 линий).</p>
@@ -658,7 +693,7 @@ export function Cases({ ctx, caseId }: { ctx: Ctx; caseId?: string | null }) {
       {multi
         ? <Result good={multiWorth >= spent}>Выпало {multi.length} · ≈{cfmt(multiWorth)} (потрачено {cfmt(spent)})</Result>
         : got
-          ? <Result good>{got.kind === C.jp && C.jpChance < 3 ? 'ДЖЕКПОТ! ' : (ctx.save.prices[got.kind] || 0) >= C.price * 5 ? 'Крупный выигрыш! ' : ''}Выпало: {GIFTS[got.kind]?.name} #{got.num} · ≈{cfmt(ctx.save.prices[got.kind])}</Result>
+          ? <Result good>{got.kind === C.jp && C.jpChance < 3 ? 'ДЖЕКПОТ! ' : (ctx.save.prices[got.kind] || 0) >= C.price * 5 ? 'Крупный выигрыш! ' : ''}Выпало: {GIFTS[got.kind]?.name} · ≈{cfmt(ctx.save.prices[got.kind])}</Result>
           : <p className="m small center">Внутри один из {C.pool.length} подарков. Чаще всего {GIFTS[C.pool[0]]?.name} ({caseOddsOf(C, 0).toFixed(0)}%), реже всего {GIFTS[C.pool[C.pool.length - 1]]?.name} ({caseOddsOf(C, C.pool.length - 1).toFixed(2).replace('.', ',')}%).</p>}
       <div className="optrow"><span className="m small">Открыть сразу</span>
         {QTYS.map(v => <button key={v} className={qty === v ? 'on' : ''} disabled={busy} onClick={() => { setQty(v); play.click() }}>×{v}</button>)}
@@ -793,7 +828,7 @@ export function Plinko({ ctx }: { ctx: Ctx }) {
       const off = OFF + (rnd() - 0.5) * 1.2
       return { x: pegX(r, kk[r]) + dir(r) * off, y: pegY(r) - Math.sqrt(M * M - off * off) }
     }
-    type Seg = { t0: number; dur: number; x0: number; y0: number; vx: number; vy: number; peg?: string; ease?: boolean }
+    type Seg = { t0: number; dur: number; x0: number; y0: number; vx: number; vy: number; peg?: string; ease?: boolean; bump?: number }
     const segs: Seg[] = []
     const hop = (t0: number, from: { x: number; y: number }, to: { x: number; y: number }, vy0: number, peg?: string): Seg => {
       const dur = (-vy0 + Math.sqrt(vy0 * vy0 + 2 * G * (to.y - from.y))) / G
@@ -811,6 +846,23 @@ export function Plinko({ ctx }: { ctx: Ctx }) {
     const land = { x: binX + (rnd() - 0.5) * 8, y: FLOOR - R }
     const fin = hop(t, prev, land, -(62 + rnd() * 14))
     fin.ease = true // последний прыжок: шар быстро выходит на середину своей ячейки, до перегородок
+    // шар обязан огибать колышки последнего ряда: подбираем боковой изгиб траектории, чтобы нигде не было пересечения
+    const bump = dir(ROWS - 1)
+    const lastPegs = Array.from({ length: ROWS + 1 }, (_, c) => ({ x: pegX(ROWS - 1, c), y: pegY(ROWS - 1) }))
+    const finX = (u: number, A: number) => {
+      const k = 1 - Math.pow(1 - u / fin.dur, 3)
+      return fin.x0 + (land.x - fin.x0) * k + bump * A * Math.sin(Math.PI * u / fin.dur)
+    }
+    let A = 0
+    for (; A < 16; A += 0.5) {
+      let ok = true
+      for (let i = 0; i <= 60 && ok; i++) {
+        const u = (fin.dur * i) / 60, x = finX(u, A), y = fin.y0 + fin.vy * u + 0.5 * G * u * u
+        for (const p of lastPegs) if (Math.hypot(x - p.x, y - p.y) < M - 0.3) { ok = false; break }
+      }
+      if (ok) break
+    }
+    fin.bump = A * bump
     segs.push(fin); t += fin.dur
     const landAt = t
     const B1 = 0.3, B2 = 0.2, END = landAt + B1 + B2 + 0.45 // два затухающих подскока на дне и пауза
@@ -827,7 +879,7 @@ export function Plinko({ ctx }: { ctx: Ctx }) {
         const sg = segs.find(s => el < s.t0 + s.dur) || segs[segs.length - 1]
         const u = Math.min(el - sg.t0, sg.dur)
         const k = sg.ease ? 1 - Math.pow(1 - u / sg.dur, 3) : 0
-        x = sg.ease ? sg.x0 + (land.x - sg.x0) * k : sg.x0 + sg.vx * u
+        x = sg.ease ? sg.x0 + (land.x - sg.x0) * k + (sg.bump || 0) * Math.sin(Math.PI * u / sg.dur) : sg.x0 + sg.vx * u
         y = sg.y0 + sg.vy * u + 0.5 * G * u * u
       }
       if (y + R > WALL_TOP) x = Math.max(lo, Math.min(hi, x)) // перегородки между ячейками
@@ -867,6 +919,7 @@ export function Plinko({ ctx }: { ctx: Ctx }) {
           <filter id="pglow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="2.2" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
         </defs>
         <rect x="0" y="0" width="300" height="275" rx="18" fill="url(#pbg)" />
+        
         {Array.from({ length: 14 }, (_, i) => <circle key={`s${i}`} cx={(i * 47 + 13) % 296 + 2} cy={(i * 29 + 7) % 190 + 4} r={0.8} fill="#dff7ec" opacity={0.25 + (i % 3) * 0.12} />)}
         {Array.from({ length: ROWS }, (_, r) => Array.from({ length: r + 2 }, (_, c) => {
           const on = hot === `${r}-${c}`
@@ -1218,6 +1271,7 @@ export function Race({ ctx }: { ctx: Ctx }) {
           <path d="M90 66H230A44 44 0 0 1 230 154H90A44 44 0 0 1 90 66Z" fill="none" stroke="#e8e8e8" strokeOpacity=".5" strokeWidth="2" strokeDasharray="5 5" />
           <g transform="translate(160 180)"><rect x="-2.500" y="-26" width="5" height="52" fill="#fff" /><rect x="-2.500" y="-26" width="5" height="52" fill="url(#rgChk)" /></g>
           <defs><pattern id="rgChk" width="5" height="10" patternUnits="userSpaceOnUse"><rect width="5" height="5" fill="#111" /><rect y="5" x="0" width="5" height="5" fill="#fff" /></pattern></defs>
+          
           <text x="160" y="104" textAnchor="middle" fontSize="11" fontWeight="800" fill="#fff" opacity=".55">{phase === 'run' ? feed[0] ? evText(feed[0]) : '' : 'СТАРТ / ФИНИШ ↓'}</text>
           {[...RACERS.keys()].sort((x, y) => (x === pick ? 1 : 0) - (y === pick ? 1 : 0)).map(i => {
             const c = RACERS[i]
